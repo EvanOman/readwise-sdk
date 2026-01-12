@@ -17,6 +17,12 @@ from readwise_sdk.v2 import (
     HighlightColor,
     Tag,
 )
+from readwise_sdk.v3 import (
+    Document,
+    DocumentCategory,
+    DocumentLocation,
+    DocumentTag,
+)
 
 __version__ = "0.1.0"
 
@@ -38,4 +44,9 @@ __all__ = [
     "HighlightColor",
     "Tag",
     "DailyReview",
+    # V3 Models
+    "Document",
+    "DocumentCategory",
+    "DocumentLocation",
+    "DocumentTag",
 ]

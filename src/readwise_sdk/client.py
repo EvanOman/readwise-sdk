@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from readwise_sdk.v2.client import ReadwiseV2Client
+    from readwise_sdk.v3.client import ReadwiseV3Client
 
 # API base URLs
 READWISE_API_V2_BASE = "https://readwise.io/api/v2"
@@ -180,6 +181,7 @@ class ReadwiseClient(BaseClient):
         """Initialize the client."""
         super().__init__(api_key, timeout, max_retries, retry_backoff)
         self._v2: ReadwiseV2Client | None = None
+        self._v3: ReadwiseV3Client | None = None
 
     @property
     def v2(self) -> ReadwiseV2Client:
@@ -189,6 +191,15 @@ class ReadwiseClient(BaseClient):
 
             self._v2 = ReadwiseV2Client(self)
         return self._v2
+
+    @property
+    def v3(self) -> ReadwiseV3Client:
+        """Access the Readwise Reader API v3 client for documents."""
+        if self._v3 is None:
+            from readwise_sdk.v3.client import ReadwiseV3Client
+
+            self._v3 = ReadwiseV3Client(self)
+        return self._v3
 
     def validate_token(self) -> bool:
         """Validate the API token.
