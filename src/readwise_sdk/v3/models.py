@@ -136,6 +136,24 @@ class Document(BaseModel):
             return result
         return []
 
+    @field_validator("reading_time", mode="before")
+    @classmethod
+    def parse_reading_time(cls, v: Any) -> int | None:
+        """Parse reading_time which can be int or string like '22 mins'."""
+        if v is None:
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            # Parse strings like "22 mins", "5 min", "1 minute"
+            import re
+
+            match = re.match(r"(\d+)", v)
+            if match:
+                return int(match.group(1))
+            return None
+        return None
+
 
 class DocumentCreate(BaseModel):
     """Data for creating a new document in Reader."""
