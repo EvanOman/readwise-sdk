@@ -38,3 +38,11 @@ install:
 # Install with CLI extras
 install-cli:
     uv sync --dev --extra cli
+
+# Build documentation
+docs-build:
+    uv run mkdocs build
+
+# Serve documentation locally
+docs-serve:
+    uv run mkdocs serve
