@@ -17,9 +17,11 @@ from readwise_sdk.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncIterator, Iterator
 
+    from readwise_sdk.v2.async_client import AsyncReadwiseV2Client
     from readwise_sdk.v2.client import ReadwiseV2Client
+    from readwise_sdk.v3.async_client import AsyncReadwiseV3Client
     from readwise_sdk.v3.client import ReadwiseV3Client
 
 # API base URLs
@@ -257,7 +259,22 @@ class ReadwiseClient(BaseClient):
 
 
 class AsyncReadwiseClient:
-    """Asynchronous Readwise client with access to v2 and v3 APIs."""
+    """Asynchronous Readwise client with access to v2 and v3 APIs.
+
+    This client provides the same functionality as ReadwiseClient but with
+    async/await support for non-blocking I/O operations.
+
+    Example:
+        async with AsyncReadwiseClient() as client:
+            async for highlight in client.v2.list_highlights():
+                print(highlight.text)
+
+            # Concurrent requests with asyncio.gather
+            docs = await asyncio.gather(
+                client.v3.get_document("doc1"),
+                client.v3.get_document("doc2"),
+            )
+    """
 
     def __init__(
         self,
@@ -285,6 +302,8 @@ class AsyncReadwiseClient:
         self.retry_backoff = retry_backoff
 
         self._client: httpx.AsyncClient | None = None
+        self._v2: AsyncReadwiseV2Client | None = None
+        self._v3: AsyncReadwiseV3Client | None = None
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -299,6 +318,24 @@ class AsyncReadwiseClient:
                 },
             )
         return self._client
+
+    @property
+    def v2(self) -> AsyncReadwiseV2Client:
+        """Access the async Readwise API v2 client for highlights, books, and tags."""
+        if self._v2 is None:
+            from readwise_sdk.v2.async_client import AsyncReadwiseV2Client
+
+            self._v2 = AsyncReadwiseV2Client(self)
+        return self._v2
+
+    @property
+    def v3(self) -> AsyncReadwiseV3Client:
+        """Access the async Readwise Reader API v3 client for documents."""
+        if self._v3 is None:
+            from readwise_sdk.v3.async_client import AsyncReadwiseV3Client
+
+            self._v3 = AsyncReadwiseV3Client(self)
+        return self._v3
 
     async def close(self) -> None:
         """Close the HTTP client."""
@@ -402,3 +439,46 @@ class AsyncReadwiseClient:
         """
         response = await self.get(f"{READWISE_API_V2_BASE}/auth/")
         return response.status_code == 204
+
+    async def paginate(
+        self,
+        url: str,
+        params: dict[str, Any] | None = None,
+        results_key: str = "results",
+        cursor_key: str = "next",
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Iterate through paginated results asynchronously.
+
+        Args:
+            url: The API endpoint URL.
+            params: Optional query parameters.
+            results_key: Key in response containing the results list.
+            cursor_key: Key in response containing the next page URL/cursor.
+
+        Yields:
+            Individual result items from each page.
+        """
+        params = params.copy() if params else {}
+
+        while True:
+            response = await self.get(url, params=params)
+            data = response.json()
+
+            results = data.get(results_key, [])
+            for item in results:
+                yield item
+
+            next_cursor = data.get(cursor_key)
+            if not next_cursor:
+                break
+
+            # Handle both full URLs and cursor strings
+            if next_cursor.startswith("http"):
+                # Extract path and query from full URL
+                from urllib.parse import parse_qs, urlparse
+
+                parsed = urlparse(next_cursor)
+                url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+            else:
+                params["pageCursor"] = next_cursor

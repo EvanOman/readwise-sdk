@@ -86,3 +86,6 @@ Thumbs.db
 *.db
 *.sqlite
 .readwise_state.json
+
+# Local learning materials
+learning/
