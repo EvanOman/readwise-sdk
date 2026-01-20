@@ -108,6 +108,55 @@ class PushResult:
     was_truncated: bool = False
 ```
 
+### AsyncHighlightPusher
+
+An async version of HighlightPusher for non-blocking I/O operations.
+
+```python
+import asyncio
+from readwise_sdk import AsyncReadwiseClient
+from readwise_sdk.contrib import AsyncHighlightPusher, SimpleHighlight
+
+async def main():
+    async with AsyncReadwiseClient() as client:
+        pusher = AsyncHighlightPusher(client)
+
+        # Push a single highlight
+        result = await pusher.push(
+            text="This is my highlight",
+            title="Article Title",
+            author="John Doe",
+        )
+
+        if result.success:
+            print(f"Created highlight {result.highlight_id}")
+
+        # Push a SimpleHighlight object
+        highlight = SimpleHighlight(
+            text="Important quote",
+            title="Book Title",
+            author="Author Name",
+            tags=["important"],
+        )
+        result = await pusher.push_highlight(highlight)
+
+        # Push multiple highlights concurrently
+        highlights = [
+            SimpleHighlight(text="First", title="Book 1"),
+            SimpleHighlight(text="Second", title="Book 2"),
+            SimpleHighlight(text="Third", title="Book 3"),
+        ]
+        results = await pusher.push_batch(highlights)
+
+asyncio.run(main())
+```
+
+All methods from `HighlightPusher` are available as async versions:
+
+- `await pusher.push(...)` - Push a single highlight
+- `await pusher.push_highlight(highlight)` - Push a SimpleHighlight object
+- `await pusher.push_batch(highlights)` - Push multiple highlights
+
 ---
 
 ## DocumentImporter

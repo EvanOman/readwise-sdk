@@ -10,6 +10,7 @@ Comprehensive Python SDK for [Readwise](https://readwise.io) with high-level wor
 
 - **V2 API (Readwise)**: Full support for highlights, books, tags, and daily review
 - **V3 API (Reader)**: Full support for documents, inbox, reading list, and archive
+- **Async Support**: Full async/await support for non-blocking I/O operations
 - **Managers**: High-level abstractions for common operations
 - **Workflows**: Pre-built workflows for digests, tagging, and syncing
 - **Contrib**: Convenience interfaces for common integration patterns
@@ -24,12 +25,32 @@ from readwise_sdk import ReadwiseClient
 client = ReadwiseClient()  # Uses READWISE_API_KEY env var
 
 # Get all highlights
-for highlight in client.v2.highlights.list():
+for highlight in client.v2.list_highlights():
     print(highlight.text)
 
 # Get Reader inbox
-for doc in client.v3.documents.list(location="new"):
+for doc in client.v3.list_documents(location="new"):
     print(doc.title)
+```
+
+### Async Example
+
+```python
+import asyncio
+from readwise_sdk import AsyncReadwiseClient
+
+async def main():
+    async with AsyncReadwiseClient() as client:
+        # Get highlights asynchronously
+        async for highlight in client.v2.list_highlights():
+            print(highlight.text)
+
+        # Concurrent requests
+        import asyncio
+        tasks = [client.v3.get_document(doc_id) for doc_id in doc_ids]
+        docs = await asyncio.gather(*tasks)
+
+asyncio.run(main())
 ```
 
 ## Architecture

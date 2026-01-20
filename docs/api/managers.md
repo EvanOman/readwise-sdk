@@ -216,3 +216,122 @@ manager.reset_state()
 print(f"Last sync: {manager.state.last_sync}")
 print(f"Total syncs: {manager.state.total_syncs}")
 ```
+
+---
+
+## Async Managers
+
+All managers have async versions for non-blocking I/O operations. They provide the same functionality as their synchronous counterparts.
+
+### AsyncHighlightManager
+
+```python
+import asyncio
+from readwise_sdk import AsyncReadwiseClient
+from readwise_sdk.managers import AsyncHighlightManager
+
+async def main():
+    async with AsyncReadwiseClient() as client:
+        manager = AsyncHighlightManager(client)
+
+        # Get all highlights
+        highlights = await manager.get_all_highlights()
+
+        # Get highlights from the last week
+        recent = await manager.get_highlights_since(days=7)
+
+        # Search highlights
+        results = await manager.search("machine learning")
+
+        # Bulk tag
+        await manager.bulk_tag([1, 2, 3], "review")
+
+asyncio.run(main())
+```
+
+### AsyncBookManager
+
+```python
+from readwise_sdk.managers import AsyncBookManager
+
+async def main():
+    async with AsyncReadwiseClient() as client:
+        manager = AsyncBookManager(client)
+
+        # List all books
+        books = await manager.list()
+
+        # Get books by category
+        articles = await manager.get_by_category("articles")
+
+        # Get book with highlights
+        book = await manager.get_with_highlights(book_id=123)
+
+        # Get reading stats
+        stats = await manager.get_reading_stats()
+```
+
+### AsyncDocumentManager
+
+```python
+from readwise_sdk.managers import AsyncDocumentManager
+
+async def main():
+    async with AsyncReadwiseClient() as client:
+        manager = AsyncDocumentManager(client)
+
+        # Get inbox
+        inbox = await manager.get_inbox()
+
+        # Get reading list
+        reading_list = await manager.get_reading_list()
+
+        # Bulk archive
+        await manager.bulk_archive(["doc1", "doc2", "doc3"])
+
+        # Get inbox stats
+        stats = await manager.get_inbox_stats()
+```
+
+### AsyncSyncManager
+
+```python
+from readwise_sdk.managers import AsyncSyncManager
+
+async def main():
+    async with AsyncReadwiseClient() as client:
+        manager = AsyncSyncManager(client, state_file="sync.json")
+
+        # Full sync
+        result = await manager.full_sync()
+        print(f"Highlights: {len(result.highlights)}")
+
+        # Incremental sync
+        result = await manager.incremental_sync()
+        print(f"New highlights: {len(result.highlights)}")
+```
+
+### Concurrent Operations
+
+Async managers enable efficient concurrent operations:
+
+```python
+import asyncio
+from readwise_sdk import AsyncReadwiseClient
+from readwise_sdk.managers import AsyncHighlightManager, AsyncBookManager
+
+async def main():
+    async with AsyncReadwiseClient() as client:
+        highlight_mgr = AsyncHighlightManager(client)
+        book_mgr = AsyncBookManager(client)
+
+        # Fetch highlights and books concurrently
+        highlights, books = await asyncio.gather(
+            highlight_mgr.get_highlights_since(days=7),
+            book_mgr.list(),
+        )
+
+        print(f"Found {len(highlights)} highlights and {len(books)} books")
+
+asyncio.run(main())
+```

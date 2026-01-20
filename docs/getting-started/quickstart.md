@@ -113,6 +113,45 @@ readwise digest daily
 readwise tags report
 ```
 
+## Async Support
+
+All SDK operations are available in async versions for non-blocking I/O:
+
+```python
+import asyncio
+from readwise_sdk import AsyncReadwiseClient
+from readwise_sdk.managers import AsyncHighlightManager
+
+async def main():
+    async with AsyncReadwiseClient() as client:
+        # Direct API access
+        async for highlight in client.v2.list_highlights():
+            print(highlight.text)
+
+        # Using async managers
+        manager = AsyncHighlightManager(client)
+        recent = await manager.get_highlights_since(days=7)
+        print(f"Found {len(recent)} highlights")
+
+        # Concurrent operations
+        tasks = [
+            client.v3.get_document(doc_id)
+            for doc_id in ["id1", "id2", "id3"]
+        ]
+        docs = await asyncio.gather(*tasks)
+
+asyncio.run(main())
+```
+
+Async classes available:
+
+- `AsyncReadwiseClient` - Main async client
+- `AsyncHighlightManager` - Async highlight operations
+- `AsyncBookManager` - Async book operations
+- `AsyncDocumentManager` - Async document operations
+- `AsyncSyncManager` - Async sync state tracking
+- `AsyncHighlightPusher` - Async highlight pushing (contrib)
+
 ## Next Steps
 
 - [Working with Highlights](../user-guide/highlights.md)
