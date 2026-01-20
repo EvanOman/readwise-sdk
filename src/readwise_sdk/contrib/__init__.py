@@ -14,6 +14,7 @@ from readwise_sdk.contrib.document_import import (
     ImportResult,
 )
 from readwise_sdk.contrib.highlight_push import (
+    AsyncHighlightPusher,
     HighlightPusher,
     PushResult,
     SimpleHighlight,
@@ -22,6 +23,7 @@ from readwise_sdk.contrib.highlight_push import (
 __all__ = [
     # highlight_push
     "HighlightPusher",
+    "AsyncHighlightPusher",
     "SimpleHighlight",
     "PushResult",
     # document_import
