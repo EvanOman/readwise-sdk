@@ -542,3 +542,61 @@ class BatchSyncResult:
     errors: list[str] = field(default_factory=list)
     sync_time: datetime = field(default_factory=lambda: datetime.now(UTC))
 ```
+
+### AsyncBatchSync
+
+An async version of BatchSync for non-blocking I/O operations.
+
+```python
+import asyncio
+from readwise_sdk import AsyncReadwiseClient
+from readwise_sdk.contrib import AsyncBatchSync, BatchSyncConfig
+
+async def main():
+    async with AsyncReadwiseClient() as client:
+        config = BatchSyncConfig(
+            batch_size=100,
+            state_file="sync_state.json",
+        )
+
+        sync = AsyncBatchSync(client, config=config)
+
+        # Sync highlights with async callback
+        async def on_highlight(highlight):
+            print(f"New: {highlight.text[:50]}...")
+            await save_to_database(highlight)
+
+        result = await sync.sync_highlights(on_item=on_highlight)
+        print(f"Synced {result.new_items} new highlights")
+
+asyncio.run(main())
+```
+
+All methods from `BatchSync` are available as async versions:
+
+- `await sync.sync_highlights(on_item=..., on_batch=..., full_sync=False)` - Sync highlights
+- `await sync.sync_books(on_item=..., on_batch=..., full_sync=False)` - Sync books
+- `await sync.sync_all(on_highlight=..., on_book=..., full_sync=False)` - Sync both
+- `sync.reset_state()` - Reset state (sync method)
+- `sync.get_stats()` - Get statistics (sync method)
+
+**Callback Support:**
+
+AsyncBatchSync supports both sync and async callbacks:
+
+```python
+async with AsyncReadwiseClient() as client:
+    sync = AsyncBatchSync(client)
+
+    # Sync callback works
+    def sync_callback(highlight):
+        print(f"Got: {highlight.text}")
+
+    # Async callback also works
+    async def async_callback(highlight):
+        await process_highlight(highlight)
+
+    # Either can be used
+    await sync.sync_highlights(on_item=sync_callback)
+    await sync.sync_highlights(on_item=async_callback)
+```
