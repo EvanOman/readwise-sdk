@@ -1,5 +1,7 @@
 """Comprehensive Python SDK for Readwise with high-level workflow abstractions."""
 
+from importlib.metadata import version
+
 from readwise_sdk.client import AsyncReadwiseClient, ReadwiseClient
 from readwise_sdk.exceptions import (
     AuthenticationError,
@@ -38,7 +40,7 @@ from readwise_sdk.workflows import (
     TagWorkflow,
 )
 
-__version__ = "0.1.0"
+__version__ = version("readwise-plus")
 
 __all__ = [
     # Clients

@@ -51,14 +51,13 @@ def test_validate_token_success(api_key: str) -> None:
 
 @respx.mock
 def test_validate_token_failure(api_key: str) -> None:
-    """Test failed token validation."""
+    """Test failed token validation returns False."""
     respx.get(f"{READWISE_API_V2_BASE}/auth/").mock(
         return_value=httpx.Response(401, text="Unauthorized")
     )
 
     client = ReadwiseClient(api_key=api_key)
-    with pytest.raises(AuthenticationError):
-        client.validate_token()
+    assert client.validate_token() is False
 
 
 @respx.mock

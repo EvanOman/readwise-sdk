@@ -114,14 +114,14 @@ class TestAsyncValidateToken:
     @respx.mock
     @pytest.mark.asyncio
     async def test_validate_token_failure(self, api_key: str) -> None:
-        """Test failed token validation."""
+        """Test failed token validation returns False."""
         respx.get(f"{READWISE_API_V2_BASE}/auth/").mock(
             return_value=httpx.Response(401, text="Invalid token")
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            with pytest.raises(AuthenticationError):
-                await client.validate_token()
+            result = await client.validate_token()
+            assert result is False
 
 
 class TestAsyncErrorHandling:

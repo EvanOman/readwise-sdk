@@ -6,10 +6,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 
-from readwise_sdk.client import READWISE_API_V2_BASE, ReadwiseClient
+from readwise_sdk.client import READWISE_API_V2_BASE, AsyncReadwiseClient, ReadwiseClient
 from readwise_sdk.contrib.batch_sync import (
+    AsyncBatchSync,
     BatchSync,
     BatchSyncConfig,
     BatchSyncResult,
@@ -594,3 +596,202 @@ class TestBatchSync:
         # Second sync
         sync.sync_highlights(full_sync=True)
         assert sync.state.total_highlights_synced == 2
+
+
+class TestAsyncBatchSync:
+    """Tests for AsyncBatchSync class."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sync_highlights(self, api_key: str) -> None:
+        """Test async syncing highlights."""
+        respx.get(f"{READWISE_API_V2_BASE}/highlights/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"id": 1, "text": "Highlight 1"},
+                        {"id": 2, "text": "Highlight 2"},
+                    ],
+                    "next": None,
+                },
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            sync = AsyncBatchSync(client)
+            result = await sync.sync_highlights()
+
+            assert result.success is True
+            assert result.new_items == 2
+            assert sync.state.total_highlights_synced == 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sync_highlights_with_sync_callback(self, api_key: str) -> None:
+        """Test async syncing highlights with synchronous callback."""
+        respx.get(f"{READWISE_API_V2_BASE}/highlights/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"id": 1, "text": "Highlight 1"},
+                        {"id": 2, "text": "Highlight 2"},
+                    ],
+                    "next": None,
+                },
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            sync = AsyncBatchSync(client)
+
+            received_highlights = []
+
+            def on_item(h: Highlight) -> None:
+                received_highlights.append(h)
+
+            result = await sync.sync_highlights(on_item=on_item)
+
+            assert result.success is True
+            assert len(received_highlights) == 2
+            assert received_highlights[0].id == 1
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sync_highlights_with_async_callback(self, api_key: str) -> None:
+        """Test async syncing highlights with async callback."""
+        respx.get(f"{READWISE_API_V2_BASE}/highlights/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"id": 1, "text": "Highlight 1"},
+                        {"id": 2, "text": "Highlight 2"},
+                    ],
+                    "next": None,
+                },
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            sync = AsyncBatchSync(client)
+
+            received_highlights = []
+
+            async def on_item(h: Highlight) -> None:
+                received_highlights.append(h)
+
+            result = await sync.sync_highlights(on_item=on_item)
+
+            assert result.success is True
+            assert len(received_highlights) == 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sync_books(self, api_key: str) -> None:
+        """Test async syncing books."""
+        respx.get(f"{READWISE_API_V2_BASE}/books/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"id": 1, "title": "Book 1"},
+                        {"id": 2, "title": "Book 2"},
+                    ],
+                    "next": None,
+                },
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            sync = AsyncBatchSync(client)
+            result = await sync.sync_books()
+
+            assert result.success is True
+            assert result.new_items == 2
+            assert sync.state.total_books_synced == 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sync_all(self, api_key: str) -> None:
+        """Test async syncing both highlights and books."""
+        respx.get(f"{READWISE_API_V2_BASE}/highlights/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [{"id": 1, "text": "H1"}],
+                    "next": None,
+                },
+            )
+        )
+        respx.get(f"{READWISE_API_V2_BASE}/books/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [{"id": 1, "title": "B1"}],
+                    "next": None,
+                },
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            sync = AsyncBatchSync(client)
+            h_result, b_result = await sync.sync_all()
+
+            assert h_result.success is True
+            assert b_result.success is True
+            assert h_result.new_items == 1
+            assert b_result.new_items == 1
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_sync_with_batch_callback(self, api_key: str) -> None:
+        """Test async syncing with batch callback."""
+        respx.get(f"{READWISE_API_V2_BASE}/highlights/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [{"id": i, "text": f"H{i}"} for i in range(150)],
+                    "next": None,
+                },
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            config = BatchSyncConfig(batch_size=50)
+            sync = AsyncBatchSync(client, config=config)
+
+            batches = []
+
+            async def on_batch(b: list[Highlight]) -> None:
+                batches.append(len(b))
+
+            result = await sync.sync_highlights(on_batch=on_batch)
+
+            assert result.success is True
+            assert result.new_items == 150
+            # Should have had batches of 50 + 50 + 50
+            assert len(batches) == 3
+            assert batches[0] == 50
+
+    def test_get_stats(self, api_key: str) -> None:
+        """Test getting stats from async batch sync."""
+        client = AsyncReadwiseClient(api_key=api_key)
+        sync = AsyncBatchSync(client)
+
+        stats = sync.get_stats()
+
+        assert stats["total_highlights_synced"] == 0
+        assert stats["total_books_synced"] == 0
+        assert stats["error_count"] == 0
+
+    def test_reset_state(self, api_key: str) -> None:
+        """Test resetting state."""
+        client = AsyncReadwiseClient(api_key=api_key)
+        sync = AsyncBatchSync(client)
+
+        sync._state.total_highlights_synced = 100
+        sync.reset_state()
+
+        assert sync.state.total_highlights_synced == 0

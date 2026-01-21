@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from importlib.metadata import version
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -26,6 +27,9 @@ READWISE_API_V3_BASE = "https://readwise.io/api/v3"
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_BACKOFF = 0.5
+
+# User agent string with dynamic version
+_USER_AGENT = f"readwise-plus/{version('readwise-plus')}"
 
 
 class BaseClient:
@@ -67,7 +71,7 @@ class BaseClient:
                 headers={
                     "Authorization": f"Token {self.api_key}",
                     "Content-Type": "application/json",
-                    "User-Agent": "readwise-plus/0.1.0",
+                    "User-Agent": _USER_AGENT,
                 },
             )
         return self._client
@@ -168,13 +172,13 @@ class ReadwiseClient(BaseClient):
         """Validate the API token.
 
         Returns:
-            True if the token is valid.
-
-        Raises:
-            AuthenticationError: If the token is invalid.
+            True if the token is valid, False otherwise.
         """
-        response = self.get(f"{READWISE_API_V2_BASE}/auth/")
-        return response.status_code == 204
+        try:
+            response = self.get(f"{READWISE_API_V2_BASE}/auth/")
+            return response.status_code == 204
+        except AuthenticationError:
+            return False
 
     def paginate(
         self,
@@ -266,7 +270,7 @@ class AsyncReadwiseClient:
                 headers={
                     "Authorization": f"Token {self.api_key}",
                     "Content-Type": "application/json",
-                    "User-Agent": "readwise-plus/0.1.0",
+                    "User-Agent": _USER_AGENT,
                 },
             )
         return self._client
@@ -351,13 +355,13 @@ class AsyncReadwiseClient:
         """Validate the API token.
 
         Returns:
-            True if the token is valid.
-
-        Raises:
-            AuthenticationError: If the token is invalid.
+            True if the token is valid, False otherwise.
         """
-        response = await self.get(f"{READWISE_API_V2_BASE}/auth/")
-        return response.status_code == 204
+        try:
+            response = await self.get(f"{READWISE_API_V2_BASE}/auth/")
+            return response.status_code == 204
+        except AuthenticationError:
+            return False
 
     async def paginate(
         self,
