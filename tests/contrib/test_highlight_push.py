@@ -11,9 +11,11 @@ from readwise_sdk.contrib.highlight_push import (
     MAX_NOTE_LENGTH,
     MAX_TEXT_LENGTH,
     MAX_TITLE_LENGTH,
+    DeleteResult,
     HighlightPusher,
     PushResult,
     SimpleHighlight,
+    UpdateResult,
 )
 from readwise_sdk.v2.models import BookCategory
 
@@ -328,3 +330,261 @@ class TestHighlightPusher:
         assert results[1].success is False
         assert results[1].error is not None
         assert "No API result returned" in results[1].error
+
+
+class TestUpdateResult:
+    """Tests for UpdateResult dataclass."""
+
+    def test_success_result(self) -> None:
+        """Test successful update result."""
+        result = UpdateResult(success=True, highlight_id=123)
+        assert result.success is True
+        assert result.highlight_id == 123
+        assert result.error is None
+        assert result.was_truncated is False
+
+    def test_failure_result(self) -> None:
+        """Test failed update result."""
+        result = UpdateResult(success=False, highlight_id=123, error="API error")
+        assert result.success is False
+        assert result.highlight_id == 123
+        assert result.error == "API error"
+
+
+class TestDeleteResult:
+    """Tests for DeleteResult dataclass."""
+
+    def test_success_result(self) -> None:
+        """Test successful delete result."""
+        result = DeleteResult(success=True, highlight_id=123)
+        assert result.success is True
+        assert result.highlight_id == 123
+        assert result.error is None
+
+    def test_failure_result(self) -> None:
+        """Test failed delete result."""
+        result = DeleteResult(success=False, highlight_id=123, error="Not found")
+        assert result.success is False
+        assert result.highlight_id == 123
+        assert result.error == "Not found"
+
+
+class TestHighlightPusherUpdate:
+    """Tests for HighlightPusher update methods."""
+
+    @respx.mock
+    def test_update_single_highlight(self, api_key: str) -> None:
+        """Test updating a single highlight."""
+        respx.patch(f"{READWISE_API_V2_BASE}/highlights/123/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": 123,
+                    "text": "Updated text",
+                    "note": "Updated note",
+                    "location": None,
+                    "location_type": None,
+                    "url": None,
+                    "color": None,
+                    "highlighted_at": None,
+                    "created_at": None,
+                    "updated_at": None,
+                    "book_id": 456,
+                    "tags": [],
+                },
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        pusher = HighlightPusher(client)
+
+        result = pusher.update(
+            highlight_id=123,
+            text="Updated text",
+            note="Updated note",
+        )
+
+        assert result.success is True
+        assert result.highlight_id == 123
+        assert result.highlight is not None
+        assert result.highlight.text == "Updated text"
+        assert result.was_truncated is False
+
+    @respx.mock
+    def test_update_with_truncation(self, api_key: str) -> None:
+        """Test updating with auto-truncation of long text."""
+        respx.patch(f"{READWISE_API_V2_BASE}/highlights/123/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": 123,
+                    "text": "x" * MAX_TEXT_LENGTH,
+                    "note": None,
+                    "location": None,
+                    "location_type": None,
+                    "url": None,
+                    "color": None,
+                    "highlighted_at": None,
+                    "created_at": None,
+                    "updated_at": None,
+                    "book_id": 456,
+                    "tags": [],
+                },
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        pusher = HighlightPusher(client, auto_truncate=True)
+
+        long_text = "x" * (MAX_TEXT_LENGTH + 100)
+        result = pusher.update(highlight_id=123, text=long_text)
+
+        assert result.success is True
+        assert result.was_truncated is True
+
+    @respx.mock
+    def test_update_batch(self, api_key: str) -> None:
+        """Test updating multiple highlights."""
+        respx.patch(f"{READWISE_API_V2_BASE}/highlights/1/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": 1,
+                    "text": "Updated 1",
+                    "note": None,
+                    "location": None,
+                    "location_type": None,
+                    "url": None,
+                    "color": None,
+                    "highlighted_at": None,
+                    "created_at": None,
+                    "updated_at": None,
+                    "book_id": 100,
+                    "tags": [],
+                },
+            )
+        )
+        respx.patch(f"{READWISE_API_V2_BASE}/highlights/2/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": 2,
+                    "text": "Updated 2",
+                    "note": None,
+                    "location": None,
+                    "location_type": None,
+                    "url": None,
+                    "color": None,
+                    "highlighted_at": None,
+                    "created_at": None,
+                    "updated_at": None,
+                    "book_id": 200,
+                    "tags": [],
+                },
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        pusher = HighlightPusher(client)
+
+        results = pusher.update_batch(
+            [
+                (1, "Updated 1", None, None, None),
+                (2, "Updated 2", None, None, None),
+            ]
+        )
+
+        assert len(results) == 2
+        assert all(r.success for r in results)
+        assert results[0].highlight_id == 1
+        assert results[1].highlight_id == 2
+
+    @respx.mock
+    def test_update_failure(self, api_key: str) -> None:
+        """Test update with API failure."""
+        respx.patch(f"{READWISE_API_V2_BASE}/highlights/999/").mock(
+            return_value=httpx.Response(404, json={"detail": "Not found"})
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        pusher = HighlightPusher(client)
+
+        result = pusher.update(highlight_id=999, text="New text")
+
+        assert result.success is False
+        assert result.highlight_id == 999
+        assert result.error is not None
+
+
+class TestHighlightPusherDelete:
+    """Tests for HighlightPusher delete methods."""
+
+    @respx.mock
+    def test_delete_single_highlight(self, api_key: str) -> None:
+        """Test deleting a single highlight."""
+        respx.delete(f"{READWISE_API_V2_BASE}/highlights/123/").mock(
+            return_value=httpx.Response(204)
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        pusher = HighlightPusher(client)
+
+        result = pusher.delete(highlight_id=123)
+
+        assert result.success is True
+        assert result.highlight_id == 123
+        assert result.error is None
+
+    @respx.mock
+    def test_delete_batch(self, api_key: str) -> None:
+        """Test deleting multiple highlights."""
+        respx.delete(f"{READWISE_API_V2_BASE}/highlights/1/").mock(return_value=httpx.Response(204))
+        respx.delete(f"{READWISE_API_V2_BASE}/highlights/2/").mock(return_value=httpx.Response(204))
+        respx.delete(f"{READWISE_API_V2_BASE}/highlights/3/").mock(return_value=httpx.Response(204))
+
+        client = ReadwiseClient(api_key=api_key)
+        pusher = HighlightPusher(client)
+
+        results = pusher.delete_batch([1, 2, 3])
+
+        assert len(results) == 3
+        assert all(r.success for r in results)
+        assert results[0].highlight_id == 1
+        assert results[1].highlight_id == 2
+        assert results[2].highlight_id == 3
+
+    @respx.mock
+    def test_delete_failure(self, api_key: str) -> None:
+        """Test delete with API failure."""
+        respx.delete(f"{READWISE_API_V2_BASE}/highlights/999/").mock(
+            return_value=httpx.Response(404, json={"detail": "Not found"})
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        pusher = HighlightPusher(client)
+
+        result = pusher.delete(highlight_id=999)
+
+        assert result.success is False
+        assert result.highlight_id == 999
+        assert result.error is not None
+
+    @respx.mock
+    def test_delete_batch_partial_failure(self, api_key: str) -> None:
+        """Test batch delete with some failures."""
+        respx.delete(f"{READWISE_API_V2_BASE}/highlights/1/").mock(return_value=httpx.Response(204))
+        respx.delete(f"{READWISE_API_V2_BASE}/highlights/2/").mock(
+            return_value=httpx.Response(404, json={"detail": "Not found"})
+        )
+        respx.delete(f"{READWISE_API_V2_BASE}/highlights/3/").mock(return_value=httpx.Response(204))
+
+        client = ReadwiseClient(api_key=api_key)
+        pusher = HighlightPusher(client)
+
+        results = pusher.delete_batch([1, 2, 3])
+
+        assert len(results) == 3
+        assert results[0].success is True
+        assert results[1].success is False
+        assert results[1].error is not None
+        assert results[2].success is True

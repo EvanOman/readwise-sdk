@@ -34,7 +34,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from readwise_sdk._utils import truncate_string
-from readwise_sdk.v2.models import BookCategory, HighlightCreate
+from readwise_sdk.v2.models import BookCategory, Highlight, HighlightCreate, HighlightUpdate
 
 if TYPE_CHECKING:
     from readwise_sdk.client import AsyncReadwiseClient, ReadwiseClient
@@ -73,6 +73,26 @@ class PushResult:
     error: str | None = None
     original: SimpleHighlight | None = None
     was_truncated: bool = False
+
+
+@dataclass
+class UpdateResult:
+    """Result of updating a highlight in Readwise."""
+
+    success: bool
+    highlight_id: int
+    highlight: Highlight | None = None
+    error: str | None = None
+    was_truncated: bool = False
+
+
+@dataclass
+class DeleteResult:
+    """Result of deleting a highlight from Readwise."""
+
+    success: bool
+    highlight_id: int
+    error: str | None = None
 
 
 def _to_create_request(
@@ -116,6 +136,46 @@ def _to_create_request(
             location=highlight.location,
             location_type=highlight.location_type,
             highlighted_at=highlight.highlighted_at,
+        ),
+        was_truncated,
+    )
+
+
+def _to_update_request(
+    text: str | None,
+    note: str | None,
+    location: int | None,
+    location_type: str | None,
+    auto_truncate: bool,
+) -> tuple[HighlightUpdate, bool]:
+    """Create HighlightUpdate, optionally truncating text fields.
+
+    Args:
+        text: New highlight text.
+        note: New note.
+        location: New location.
+        location_type: New location type.
+        auto_truncate: Whether to truncate fields to API limits.
+
+    Returns:
+        Tuple of (HighlightUpdate, was_truncated).
+    """
+    was_truncated = False
+
+    if auto_truncate:
+        if text is not None:
+            text, t1 = truncate_string(text, MAX_TEXT_LENGTH)
+            was_truncated = was_truncated or t1
+        if note is not None:
+            note, t2 = truncate_string(note, MAX_NOTE_LENGTH)
+            was_truncated = was_truncated or t2
+
+    return (
+        HighlightUpdate(
+            text=text,
+            note=note,
+            location=location,
+            location_type=location_type,
         ),
         was_truncated,
     )
@@ -273,6 +333,113 @@ class HighlightPusher:
             True if the token is valid.
         """
         return self._client.validate_token()
+
+    def update(
+        self,
+        highlight_id: int,
+        *,
+        text: str | None = None,
+        note: str | None = None,
+        location: int | None = None,
+        location_type: str | None = None,
+    ) -> UpdateResult:
+        """Update an existing highlight.
+
+        Args:
+            highlight_id: The ID of the highlight to update.
+            text: New highlight text.
+            note: New note.
+            location: New location in the source.
+            location_type: Type of location (e.g., "page").
+
+        Returns:
+            UpdateResult with success status and updated highlight.
+        """
+        results = self.update_batch([(highlight_id, text, note, location, location_type)])
+        return results[0]
+
+    def update_batch(
+        self,
+        updates: list[tuple[int, str | None, str | None, int | None, str | None]],
+    ) -> list[UpdateResult]:
+        """Update multiple highlights.
+
+        Args:
+            updates: List of tuples (highlight_id, text, note, location, location_type).
+                     Pass None for fields you don't want to update.
+
+        Returns:
+            List of UpdateResults in the same order as input.
+        """
+        results: list[UpdateResult] = []
+
+        for highlight_id, text, note, location, location_type in updates:
+            try:
+                update_req, was_truncated = _to_update_request(
+                    text, note, location, location_type, self._auto_truncate
+                )
+                highlight = self._client.v2.update_highlight(highlight_id, update_req)
+                results.append(
+                    UpdateResult(
+                        success=True,
+                        highlight_id=highlight_id,
+                        highlight=highlight,
+                        was_truncated=was_truncated,
+                    )
+                )
+            except Exception as e:
+                results.append(
+                    UpdateResult(
+                        success=False,
+                        highlight_id=highlight_id,
+                        error=str(e),
+                    )
+                )
+
+        return results
+
+    def delete(self, highlight_id: int) -> DeleteResult:
+        """Delete a highlight.
+
+        Args:
+            highlight_id: The ID of the highlight to delete.
+
+        Returns:
+            DeleteResult with success status.
+        """
+        results = self.delete_batch([highlight_id])
+        return results[0]
+
+    def delete_batch(self, highlight_ids: list[int]) -> list[DeleteResult]:
+        """Delete multiple highlights.
+
+        Args:
+            highlight_ids: List of highlight IDs to delete.
+
+        Returns:
+            List of DeleteResults in the same order as input.
+        """
+        results: list[DeleteResult] = []
+
+        for highlight_id in highlight_ids:
+            try:
+                self._client.v2.delete_highlight(highlight_id)
+                results.append(
+                    DeleteResult(
+                        success=True,
+                        highlight_id=highlight_id,
+                    )
+                )
+            except Exception as e:
+                results.append(
+                    DeleteResult(
+                        success=False,
+                        highlight_id=highlight_id,
+                        error=str(e),
+                    )
+                )
+
+        return results
 
 
 class AsyncHighlightPusher:
@@ -433,3 +600,110 @@ class AsyncHighlightPusher:
             True if the token is valid.
         """
         return await self._client.validate_token()
+
+    async def update(
+        self,
+        highlight_id: int,
+        *,
+        text: str | None = None,
+        note: str | None = None,
+        location: int | None = None,
+        location_type: str | None = None,
+    ) -> UpdateResult:
+        """Update an existing highlight.
+
+        Args:
+            highlight_id: The ID of the highlight to update.
+            text: New highlight text.
+            note: New note.
+            location: New location in the source.
+            location_type: Type of location (e.g., "page").
+
+        Returns:
+            UpdateResult with success status and updated highlight.
+        """
+        results = await self.update_batch([(highlight_id, text, note, location, location_type)])
+        return results[0]
+
+    async def update_batch(
+        self,
+        updates: list[tuple[int, str | None, str | None, int | None, str | None]],
+    ) -> list[UpdateResult]:
+        """Update multiple highlights.
+
+        Args:
+            updates: List of tuples (highlight_id, text, note, location, location_type).
+                     Pass None for fields you don't want to update.
+
+        Returns:
+            List of UpdateResults in the same order as input.
+        """
+        results: list[UpdateResult] = []
+
+        for highlight_id, text, note, location, location_type in updates:
+            try:
+                update_req, was_truncated = _to_update_request(
+                    text, note, location, location_type, self._auto_truncate
+                )
+                highlight = await self._client.v2.update_highlight(highlight_id, update_req)
+                results.append(
+                    UpdateResult(
+                        success=True,
+                        highlight_id=highlight_id,
+                        highlight=highlight,
+                        was_truncated=was_truncated,
+                    )
+                )
+            except Exception as e:
+                results.append(
+                    UpdateResult(
+                        success=False,
+                        highlight_id=highlight_id,
+                        error=str(e),
+                    )
+                )
+
+        return results
+
+    async def delete(self, highlight_id: int) -> DeleteResult:
+        """Delete a highlight.
+
+        Args:
+            highlight_id: The ID of the highlight to delete.
+
+        Returns:
+            DeleteResult with success status.
+        """
+        results = await self.delete_batch([highlight_id])
+        return results[0]
+
+    async def delete_batch(self, highlight_ids: list[int]) -> list[DeleteResult]:
+        """Delete multiple highlights.
+
+        Args:
+            highlight_ids: List of highlight IDs to delete.
+
+        Returns:
+            List of DeleteResults in the same order as input.
+        """
+        results: list[DeleteResult] = []
+
+        for highlight_id in highlight_ids:
+            try:
+                await self._client.v2.delete_highlight(highlight_id)
+                results.append(
+                    DeleteResult(
+                        success=True,
+                        highlight_id=highlight_id,
+                    )
+                )
+            except Exception as e:
+                results.append(
+                    DeleteResult(
+                        success=False,
+                        highlight_id=highlight_id,
+                        error=str(e),
+                    )
+                )
+
+        return results

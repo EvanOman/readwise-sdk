@@ -179,6 +179,7 @@ class HighlightUpdate(BaseModel):
     text: str | None = Field(default=None, max_length=8191)
     note: str | None = Field(default=None, max_length=8191)
     location: int | None = None
+    location_type: str | None = None
     url: str | None = None
     color: HighlightColor | None = None
 
@@ -194,6 +195,8 @@ class HighlightUpdate(BaseModel):
             data["note"] = self.note
         if self.location is not None:
             data["location"] = self.location
+        if self.location_type is not None:
+            data["location_type"] = self.location_type
         if self.url is not None:
             data["url"] = self.url
         if self.color is not None:

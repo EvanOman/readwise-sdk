@@ -8,6 +8,8 @@ from readwise_sdk.v2.models import (
     DailyReview,
     Highlight,
     HighlightColor,
+    HighlightCreate,
+    HighlightUpdate,
     Tag,
 )
 
@@ -18,6 +20,8 @@ __all__ = [
     "BookCategory",
     "Highlight",
     "HighlightColor",
+    "HighlightCreate",
+    "HighlightUpdate",
     "Tag",
     "DailyReview",
 ]
