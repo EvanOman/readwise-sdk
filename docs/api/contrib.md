@@ -108,6 +108,94 @@ class PushResult:
     was_truncated: bool = False
 ```
 
+#### update
+
+Update an existing highlight:
+
+```python
+result = pusher.update(
+    highlight_id=123,
+    text="Updated highlight text",
+    note="Updated note",
+    location=50,
+    location_type="page",
+)
+
+if result.success:
+    print(f"Updated highlight {result.highlight_id}")
+    print(f"New text: {result.highlight.text}")
+```
+
+#### update_batch
+
+Update multiple highlights:
+
+```python
+# Each tuple: (highlight_id, text, note, location, location_type)
+# Pass None for fields you don't want to update
+updates = [
+    (1, "New text for highlight 1", None, None, None),
+    (2, None, "New note for highlight 2", None, None),
+    (3, "New text", "New note", 100, "page"),
+]
+
+results = pusher.update_batch(updates)
+for result in results:
+    if result.success:
+        print(f"Updated: {result.highlight_id}")
+    else:
+        print(f"Failed {result.highlight_id}: {result.error}")
+```
+
+#### delete
+
+Delete a highlight:
+
+```python
+result = pusher.delete(highlight_id=123)
+
+if result.success:
+    print(f"Deleted highlight {result.highlight_id}")
+else:
+    print(f"Failed: {result.error}")
+```
+
+#### delete_batch
+
+Delete multiple highlights:
+
+```python
+results = pusher.delete_batch([1, 2, 3])
+
+for result in results:
+    if result.success:
+        print(f"Deleted: {result.highlight_id}")
+    else:
+        print(f"Failed {result.highlight_id}: {result.error}")
+```
+
+#### UpdateResult
+
+```python
+@dataclass
+class UpdateResult:
+    success: bool
+    highlight_id: int
+    highlight: Highlight | None = None  # Updated highlight if successful
+    error: str | None = None
+    was_truncated: bool = False
+```
+
+#### DeleteResult
+
+```python
+@dataclass
+class DeleteResult:
+    success: bool
+    highlight_id: int
+    error: str | None = None
+```
+
 ### AsyncHighlightPusher
 
 An async version of HighlightPusher for non-blocking I/O operations.
@@ -153,9 +241,43 @@ asyncio.run(main())
 
 All methods from `HighlightPusher` are available as async versions:
 
+**Create:**
 - `await pusher.push(...)` - Push a single highlight
 - `await pusher.push_highlight(highlight)` - Push a SimpleHighlight object
 - `await pusher.push_batch(highlights)` - Push multiple highlights
+
+**Update:**
+- `await pusher.update(highlight_id, text=..., note=...)` - Update a highlight
+- `await pusher.update_batch(updates)` - Update multiple highlights
+
+**Delete:**
+- `await pusher.delete(highlight_id)` - Delete a highlight
+- `await pusher.delete_batch(highlight_ids)` - Delete multiple highlights
+
+```python
+async def main():
+    async with AsyncReadwiseClient() as client:
+        pusher = AsyncHighlightPusher(client)
+
+        # Update
+        result = await pusher.update(
+            highlight_id=123,
+            text="Updated text",
+            note="Updated note",
+        )
+
+        # Batch update
+        results = await pusher.update_batch([
+            (1, "New text 1", None, None, None),
+            (2, "New text 2", "New note", None, None),
+        ])
+
+        # Delete
+        result = await pusher.delete(highlight_id=123)
+
+        # Batch delete
+        results = await pusher.delete_batch([1, 2, 3])
+```
 
 ---
 
