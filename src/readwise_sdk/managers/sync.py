@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -61,7 +61,7 @@ class SyncResult:
     highlights: list[Highlight] = field(default_factory=list)
     books: list[Book] = field(default_factory=list)
     documents: list[Document] = field(default_factory=list)
-    sync_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    sync_time: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def is_empty(self) -> bool:
@@ -143,7 +143,7 @@ class SyncManager:
         Returns:
             SyncResult with all synced data.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = SyncResult(sync_time=now)
 
         if include_highlights:
@@ -182,7 +182,7 @@ class SyncManager:
         Returns:
             SyncResult with newly synced data.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = SyncResult(sync_time=now)
 
         if include_highlights:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from readwise_sdk.v2.models import Highlight, HighlightCreate
@@ -51,9 +51,9 @@ class HighlightManager:
         """
         if since is None:
             if days is not None:
-                since = datetime.now(timezone.utc) - timedelta(days=days)
+                since = datetime.now(UTC) - timedelta(days=days)
             elif hours is not None:
-                since = datetime.now(timezone.utc) - timedelta(hours=hours)
+                since = datetime.now(UTC) - timedelta(hours=hours)
             else:
                 raise ValueError("Must specify days, hours, or since")
 
