@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from readwise_sdk._utils import parse_datetime_string
 
@@ -65,6 +65,7 @@ class Document(BaseModel):
     summary: str | None = None
     image_url: str | None = None
     content: str | None = None  # HTML content, only when requested
+    html_content: str | None = None  # HTML content (alternate API field name)
     notes: str | None = None
     parent_id: str | None = None
     reading_progress: float | None = None
@@ -74,6 +75,17 @@ class Document(BaseModel):
     last_moved_at: datetime | None = None
 
     model_config = {"extra": "ignore"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def merge_html_content(cls, data: Any) -> Any:
+        """Readwise API returns HTML in 'html_content' when withHtmlContent=true,
+        but also has a 'content' field. Merge html_content into content."""
+        if isinstance(data, dict):
+            html_content = data.get("html_content")
+            if html_content and not data.get("content"):
+                data["content"] = html_content
+        return data
 
     @field_validator("category", mode="before")
     @classmethod
