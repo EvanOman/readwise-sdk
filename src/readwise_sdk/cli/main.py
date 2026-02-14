@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from datetime import UTC, datetime, timedelta
+from importlib.metadata import version as pkg_version
 from typing import Annotated
 
 try:
@@ -744,7 +745,7 @@ def tag_report(
 @app.command("version")
 def version() -> None:
     """Show version information."""
-    console.print("readwise-plus v0.1.0")
+    console.print(f"readwise-plus v{pkg_version('readwise-plus')}")
 
 
 if __name__ == "__main__":
