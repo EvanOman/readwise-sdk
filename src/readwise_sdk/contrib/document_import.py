@@ -35,7 +35,7 @@ from urllib.parse import urlparse
 from readwise_sdk.v3.models import Document, DocumentCategory, DocumentLocation
 
 if TYPE_CHECKING:
-    from readwise_sdk.client import ReadwiseClient
+    from readwise_sdk.client import AsyncReadwiseClient, ReadwiseClient
 
 # Average reading speed (words per minute)
 WORDS_PER_MINUTE = 200
@@ -394,4 +394,237 @@ class DocumentImporter:
             The document ID of the created document.
         """
         result = self._client.v3.save_url(url, **kwargs)
+        return result.id
+
+
+class AsyncDocumentImporter:
+    """Async interface for importing documents from Readwise Reader.
+
+    Provides the same functionality as DocumentImporter but with async/await
+    support for use with async frameworks like FastAPI or aiohttp.
+
+    Example:
+        from readwise_sdk import AsyncReadwiseClient
+        from readwise_sdk.contrib import AsyncDocumentImporter
+
+        async with AsyncReadwiseClient() as client:
+            importer = AsyncDocumentImporter(client)
+
+            # Import a single document with full content
+            doc = await importer.import_document("doc_id_here", with_content=True)
+            print(f"Title: {doc.title}")
+    """
+
+    def __init__(
+        self,
+        client: AsyncReadwiseClient,
+        *,
+        extract_metadata: bool = True,
+        clean_html: bool = True,
+    ) -> None:
+        """Initialize the async document importer.
+
+        Args:
+            client: The async Readwise client.
+            extract_metadata: Extract domain, word count, etc.
+            clean_html: Convert HTML content to clean text.
+        """
+        self._client = client
+        self._extract_metadata = extract_metadata
+        self._clean_html = clean_html
+
+    async def import_document(
+        self,
+        document_id: str,
+        *,
+        with_content: bool = True,
+    ) -> ImportedDocument:
+        """Import a single document with optional content.
+
+        Args:
+            document_id: The document ID.
+            with_content: Whether to fetch HTML content.
+
+        Returns:
+            ImportedDocument with extracted metadata.
+
+        Raises:
+            ValueError: If the document doesn't exist.
+        """
+        doc = await self._client.v3.get_document(document_id, with_content=with_content)
+        if doc is None:
+            raise ValueError(f"Document {document_id} not found")
+        return ImportedDocument.from_document(
+            doc,
+            extract_metadata=self._extract_metadata,
+            clean_html=self._clean_html,
+        )
+
+    async def import_batch(
+        self,
+        document_ids: list[str],
+        *,
+        with_content: bool = True,
+    ) -> list[ImportResult]:
+        """Import multiple documents.
+
+        Each document is fetched independently - failures don't affect others.
+
+        Args:
+            document_ids: List of document IDs.
+            with_content: Whether to fetch HTML content.
+
+        Returns:
+            List of ImportResults in the same order as input.
+        """
+        results: list[ImportResult] = []
+
+        for doc_id in document_ids:
+            try:
+                imported = await self.import_document(doc_id, with_content=with_content)
+                results.append(
+                    ImportResult(
+                        success=True,
+                        document=imported,
+                        document_id=doc_id,
+                    )
+                )
+            except Exception as e:
+                results.append(
+                    ImportResult(
+                        success=False,
+                        document_id=doc_id,
+                        error=str(e),
+                    )
+                )
+
+        return results
+
+    async def list_inbox(
+        self,
+        *,
+        limit: int | None = None,
+        with_content: bool = False,
+    ) -> list[ImportedDocument]:
+        """List inbox documents with optional metadata extraction.
+
+        Args:
+            limit: Maximum number of documents to return.
+            with_content: Whether to fetch HTML content (slower).
+
+        Returns:
+            List of ImportedDocuments.
+        """
+        return await self._list_location(
+            DocumentLocation.NEW, limit=limit, with_content=with_content
+        )
+
+    async def list_reading_list(
+        self,
+        *,
+        limit: int | None = None,
+        with_content: bool = False,
+    ) -> list[ImportedDocument]:
+        """List reading list documents with optional metadata extraction.
+
+        Args:
+            limit: Maximum number of documents to return.
+            with_content: Whether to fetch HTML content (slower).
+
+        Returns:
+            List of ImportedDocuments.
+        """
+        return await self._list_location(
+            DocumentLocation.LATER, limit=limit, with_content=with_content
+        )
+
+    async def list_archive(
+        self,
+        *,
+        limit: int | None = None,
+        with_content: bool = False,
+    ) -> list[ImportedDocument]:
+        """List archived documents with optional metadata extraction.
+
+        Args:
+            limit: Maximum number of documents to return.
+            with_content: Whether to fetch HTML content (slower).
+
+        Returns:
+            List of ImportedDocuments.
+        """
+        return await self._list_location(
+            DocumentLocation.ARCHIVE, limit=limit, with_content=with_content
+        )
+
+    async def _list_location(
+        self,
+        location: DocumentLocation,
+        *,
+        limit: int | None = None,
+        with_content: bool = False,
+    ) -> list[ImportedDocument]:
+        """List documents from a specific location."""
+        results = []
+        i = 0
+        async for doc in self._client.v3.list_documents(
+            location=location, with_content=with_content
+        ):
+            if limit and i >= limit:
+                break
+            results.append(
+                ImportedDocument.from_document(
+                    doc,
+                    extract_metadata=self._extract_metadata,
+                    clean_html=self._clean_html,
+                )
+            )
+            i += 1
+        return results
+
+    async def list_updated_since(
+        self,
+        since: datetime,
+        *,
+        limit: int | None = None,
+        with_content: bool = False,
+    ) -> list[ImportedDocument]:
+        """List documents updated since a timestamp.
+
+        Args:
+            since: Only return documents updated after this time.
+            limit: Maximum number of documents to return.
+            with_content: Whether to fetch HTML content (slower).
+
+        Returns:
+            List of ImportedDocuments.
+        """
+        results = []
+        i = 0
+        async for doc in self._client.v3.list_documents(
+            updated_after=since, with_content=with_content
+        ):
+            if limit and i >= limit:
+                break
+            results.append(
+                ImportedDocument.from_document(
+                    doc,
+                    extract_metadata=self._extract_metadata,
+                    clean_html=self._clean_html,
+                )
+            )
+            i += 1
+        return results
+
+    async def save_url(self, url: str, **kwargs) -> str:
+        """Save a URL to Readwise Reader.
+
+        Args:
+            url: The URL to save.
+            **kwargs: Additional arguments passed to create_document.
+
+        Returns:
+            The document ID of the created document.
+        """
+        result = await self._client.v3.save_url(url, **kwargs)
         return result.id

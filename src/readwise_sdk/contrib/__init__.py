@@ -14,6 +14,7 @@ from readwise_sdk.contrib.batch_sync import (
     BatchSyncResult,
 )
 from readwise_sdk.contrib.document_import import (
+    AsyncDocumentImporter,
     DocumentImporter,
     ImportedDocument,
     ImportResult,
@@ -41,6 +42,7 @@ __all__ = [
     "FieldTruncation",
     # document_import
     "DocumentImporter",
+    "AsyncDocumentImporter",
     "ImportedDocument",
     "ImportResult",
     # batch_sync
