@@ -1,5 +1,7 @@
 """Tests for Readwise API v2 client."""
 
+from datetime import UTC, datetime
+
 import httpx
 import pytest
 import respx
@@ -68,6 +70,32 @@ class TestHighlights:
         request = route.calls.last.request
         assert "book_id=123" in str(request.url)
         assert "page_size=50" in str(request.url)
+
+    @respx.mock
+    def test_list_highlights_with_date_filters(self, api_key: str) -> None:
+        """Test listing highlights with highlighted_after and highlighted_before filters."""
+        route = respx.get(f"{READWISE_API_V2_BASE}/highlights/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"results": [], "next": None},
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        after = datetime(2024, 1, 1, tzinfo=UTC)
+        before = datetime(2024, 6, 30, tzinfo=UTC)
+        list(
+            client.v2.list_highlights(
+                highlighted_after=after,
+                highlighted_before=before,
+            )
+        )
+
+        assert route.called
+        request = route.calls.last.request
+        url_str = str(request.url)
+        assert "highlighted_at__gt=" in url_str
+        assert "highlighted_at__lt=" in url_str
 
     @respx.mock
     def test_get_highlight(self, api_key: str) -> None:
@@ -195,6 +223,37 @@ class TestBooks:
         assert "category=articles" in str(request.url)
 
     @respx.mock
+    def test_list_books_with_filters(self, api_key: str) -> None:
+        """Test listing books with source, updated_before, last_highlight_after/before."""
+        route = respx.get(f"{READWISE_API_V2_BASE}/books/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"results": [], "next": None},
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        updated_before = datetime(2024, 12, 31, tzinfo=UTC)
+        highlight_after = datetime(2024, 1, 1, tzinfo=UTC)
+        highlight_before = datetime(2024, 6, 30, tzinfo=UTC)
+        list(
+            client.v2.list_books(
+                source="kindle",
+                updated_before=updated_before,
+                last_highlight_after=highlight_after,
+                last_highlight_before=highlight_before,
+            )
+        )
+
+        assert route.called
+        request = route.calls.last.request
+        url_str = str(request.url)
+        assert "source=kindle" in url_str
+        assert "updated__lt=" in url_str
+        assert "last_highlight_at__gt=" in url_str
+        assert "last_highlight_at__lt=" in url_str
+
+    @respx.mock
     def test_get_book(self, api_key: str) -> None:
         """Test getting a single book."""
         respx.get(f"{READWISE_API_V2_BASE}/books/456/").mock(
@@ -259,6 +318,22 @@ class TestHighlightTags:
         assert tag.name == "new-tag"
 
     @respx.mock
+    def test_update_highlight_tag(self, api_key: str) -> None:
+        """Test updating a tag on a highlight."""
+        respx.patch(f"{READWISE_API_V2_BASE}/highlights/123/tags/5/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"id": 5, "name": "updated-tag"},
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        tag = client.v2.update_highlight_tag(123, 5, "updated-tag")
+
+        assert tag.id == 5
+        assert tag.name == "updated-tag"
+
+    @respx.mock
     def test_delete_highlight_tag(self, api_key: str) -> None:
         """Test removing a tag from a highlight."""
         respx.delete(f"{READWISE_API_V2_BASE}/highlights/123/tags/5/").mock(
@@ -307,6 +382,32 @@ class TestBookTags:
         assert tag.id == 10
         assert tag.name == "programming"
 
+    @respx.mock
+    def test_update_book_tag(self, api_key: str) -> None:
+        """Test updating a tag on a book."""
+        respx.patch(f"{READWISE_API_V2_BASE}/books/456/tags/10/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"id": 10, "name": "python"},
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        tag = client.v2.update_book_tag(456, 10, "python")
+
+        assert tag.id == 10
+        assert tag.name == "python"
+
+    @respx.mock
+    def test_delete_book_tag(self, api_key: str) -> None:
+        """Test removing a tag from a book."""
+        respx.delete(f"{READWISE_API_V2_BASE}/books/456/tags/10/").mock(
+            return_value=httpx.Response(204)
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        client.v2.delete_book_tag(456, 10)  # Should not raise
+
 
 class TestExport:
     """Tests for export operations."""
@@ -340,6 +441,45 @@ class TestExport:
         assert len(export_books) == 1
         assert export_books[0].title == "Book One"
         assert len(export_books[0].highlights) == 2
+
+    @respx.mock
+    def test_export_with_filters(self, api_key: str) -> None:
+        """Test exporting highlights with updated_after, book_ids, and include_deleted."""
+        route = respx.get(url__startswith=f"{READWISE_API_V2_BASE}/export/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "user_book_id": 1,
+                            "title": "Filtered Book",
+                            "author": "Author",
+                            "highlights": [{"id": 10, "text": "Filtered highlight"}],
+                        }
+                    ],
+                    "nextPageCursor": None,
+                },
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        updated_after = datetime(2024, 1, 1, tzinfo=UTC)
+        export_books = list(
+            client.v2.export_highlights(
+                updated_after=updated_after,
+                book_ids=[1, 2, 3],
+                include_deleted=True,
+            )
+        )
+
+        assert route.called
+        request = route.calls.last.request
+        url_str = str(request.url)
+        assert "updatedAfter=" in url_str
+        assert "ids=1%2C2%2C3" in url_str or "ids=1,2,3" in url_str
+        assert "includeDeleted=true" in url_str
+        assert len(export_books) == 1
+        assert export_books[0].title == "Filtered Book"
 
 
 class TestDailyReview:

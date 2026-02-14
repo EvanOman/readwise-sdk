@@ -1,5 +1,7 @@
 """Tests for async Readwise Reader API v3 client."""
 
+import asyncio
+
 import httpx
 import pytest
 import respx
@@ -31,9 +33,7 @@ class TestAsyncV3Documents:
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            docs = []
-            async for doc in client.v3.list_documents():
-                docs.append(doc)
+            docs = [doc async for doc in client.v3.list_documents()]
 
             assert len(docs) == 2
             assert docs[0].id == "doc1"
@@ -51,17 +51,65 @@ class TestAsyncV3Documents:
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            docs = []
-            async for doc in client.v3.list_documents(
-                location=DocumentLocation.NEW,
-                category=DocumentCategory.ARTICLE,
-            ):
-                docs.append(doc)
+            _ = [
+                doc
+                async for doc in client.v3.list_documents(
+                    location=DocumentLocation.NEW,
+                    category=DocumentCategory.ARTICLE,
+                )
+            ]
 
             assert route.called
             request = route.calls.last.request
             assert "location=new" in str(request.url)
             assert "category=article" in str(request.url)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_list_documents_with_tags(self, api_key: str) -> None:
+        """Test listing documents filtered by tags."""
+        route = respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"results": [], "nextPageCursor": None},
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            _ = [doc async for doc in client.v3.list_documents(tags=["python"])]
+
+            assert route.called
+            request = route.calls.last.request
+            assert "tag=python" in str(request.url)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_list_documents_with_content(self, api_key: str) -> None:
+        """Test listing documents with with_content parameter."""
+        route = respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "doc1",
+                            "url": "https://example.com/1",
+                            "title": "Article 1",
+                            "html_content": "<p>Content</p>",
+                        }
+                    ],
+                    "nextPageCursor": None,
+                },
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            docs = [doc async for doc in client.v3.list_documents(with_content=True)]
+
+            assert route.called
+            request = route.calls.last.request
+            assert "withHtmlContent=true" in str(request.url)
+            assert len(docs) == 1
 
     @respx.mock
     @pytest.mark.asyncio
@@ -163,8 +211,9 @@ class TestAsyncV3DocumentMovement:
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_move_to_later(self, api_key: str) -> None:
-        """Test moving document to reading list."""
+    @pytest.mark.parametrize("method", ["move_to_later", "archive", "move_to_inbox"])
+    async def test_movement_methods(self, api_key: str, method: str) -> None:
+        """Test document movement methods all update the document and return it."""
         respx.patch(f"{READWISE_API_V3_BASE}/update/doc123/").mock(
             return_value=httpx.Response(
                 200,
@@ -173,37 +222,7 @@ class TestAsyncV3DocumentMovement:
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            result = await client.v3.move_to_later("doc123")
-            assert result.id == "doc123"
-
-    @respx.mock
-    @pytest.mark.asyncio
-    async def test_archive(self, api_key: str) -> None:
-        """Test archiving a document."""
-        respx.patch(f"{READWISE_API_V3_BASE}/update/doc123/").mock(
-            return_value=httpx.Response(
-                200,
-                json={"id": "doc123", "url": "https://example.com"},
-            )
-        )
-
-        async with AsyncReadwiseClient(api_key=api_key) as client:
-            result = await client.v3.archive("doc123")
-            assert result.id == "doc123"
-
-    @respx.mock
-    @pytest.mark.asyncio
-    async def test_move_to_inbox(self, api_key: str) -> None:
-        """Test moving document to inbox."""
-        respx.patch(f"{READWISE_API_V3_BASE}/update/doc123/").mock(
-            return_value=httpx.Response(
-                200,
-                json={"id": "doc123", "url": "https://example.com"},
-            )
-        )
-
-        async with AsyncReadwiseClient(api_key=api_key) as client:
-            result = await client.v3.move_to_inbox("doc123")
+            result = await getattr(client.v3, method)("doc123")
             assert result.id == "doc123"
 
 
@@ -228,9 +247,7 @@ class TestAsyncV3Tags:
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            tags = []
-            async for tag in client.v3.list_tags():
-                tags.append(tag)
+            tags = [tag async for tag in client.v3.list_tags()]
 
             assert len(tags) == 2
             assert tags[0].name == "Tag One"
@@ -239,7 +256,6 @@ class TestAsyncV3Tags:
     @pytest.mark.asyncio
     async def test_add_tag(self, api_key: str) -> None:
         """Test adding a tag to a document."""
-        # First mock get_document to return existing tags
         respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
             return_value=httpx.Response(
                 200,
@@ -256,8 +272,6 @@ class TestAsyncV3Tags:
                 },
             )
         )
-
-        # Then mock the update
         respx.patch(f"{READWISE_API_V3_BASE}/update/doc123/").mock(
             return_value=httpx.Response(
                 200,
@@ -271,8 +285,39 @@ class TestAsyncV3Tags:
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_add_tag_not_found(self, api_key: str) -> None:
-        """Test adding tag to non-existent document."""
+    async def test_remove_tag(self, api_key: str) -> None:
+        """Test removing a tag from a document."""
+        respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "doc123",
+                            "url": "https://example.com",
+                            "tags": ["keep-me", "remove-me"],
+                        }
+                    ],
+                    "nextPageCursor": None,
+                },
+            )
+        )
+        respx.patch(f"{READWISE_API_V3_BASE}/update/doc123/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"id": "doc123", "url": "https://readwise.io/reader/doc123"},
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            result = await client.v3.remove_tag("doc123", "remove-me")
+            assert result.id == "doc123"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("method", ["remove_tag", "add_tag"])
+    async def test_tag_operation_not_found(self, api_key: str, method: str) -> None:
+        """Test that tag operations raise NotFoundError for non-existent documents."""
         respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
             return_value=httpx.Response(
                 200,
@@ -282,7 +327,7 @@ class TestAsyncV3Tags:
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
             with pytest.raises(NotFoundError):
-                await client.v3.add_tag("nonexistent", "tag")
+                await getattr(client.v3, method)("nonexistent", "tag")
 
 
 class TestAsyncV3ConvenienceMethods:
@@ -290,81 +335,36 @@ class TestAsyncV3ConvenienceMethods:
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_get_inbox(self, api_key: str) -> None:
-        """Test getting inbox documents."""
+    @pytest.mark.parametrize(
+        ("method", "expected_param"),
+        [
+            ("get_inbox", "location=new"),
+            ("get_reading_list", "location=later"),
+            ("get_archive", "location=archive"),
+            ("get_articles", "category=article"),
+        ],
+    )
+    async def test_convenience_methods(
+        self, api_key: str, method: str, expected_param: str
+    ) -> None:
+        """Test convenience methods pass the correct query parameters."""
         route = respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "results": [
-                        {"id": "doc1", "url": "https://example.com/1", "title": "Inbox Doc"}
-                    ],
+                    "results": [{"id": "doc1", "url": "https://example.com/1", "title": "Doc 1"}],
                     "nextPageCursor": None,
                 },
             )
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            docs = []
-            async for doc in client.v3.get_inbox():
-                docs.append(doc)
+            docs = [doc async for doc in getattr(client.v3, method)()]
 
             assert len(docs) == 1
             assert route.called
             request = route.calls.last.request
-            assert "location=new" in str(request.url)
-
-    @respx.mock
-    @pytest.mark.asyncio
-    async def test_get_reading_list(self, api_key: str) -> None:
-        """Test getting reading list documents."""
-        route = respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "results": [
-                        {"id": "doc1", "url": "https://example.com/1", "title": "Later Doc"}
-                    ],
-                    "nextPageCursor": None,
-                },
-            )
-        )
-
-        async with AsyncReadwiseClient(api_key=api_key) as client:
-            docs = []
-            async for doc in client.v3.get_reading_list():
-                docs.append(doc)
-
-            assert len(docs) == 1
-            assert route.called
-            request = route.calls.last.request
-            assert "location=later" in str(request.url)
-
-    @respx.mock
-    @pytest.mark.asyncio
-    async def test_get_archive(self, api_key: str) -> None:
-        """Test getting archived documents."""
-        route = respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "results": [
-                        {"id": "doc1", "url": "https://example.com/1", "title": "Archived Doc"}
-                    ],
-                    "nextPageCursor": None,
-                },
-            )
-        )
-
-        async with AsyncReadwiseClient(api_key=api_key) as client:
-            docs = []
-            async for doc in client.v3.get_archive():
-                docs.append(doc)
-
-            assert len(docs) == 1
-            assert route.called
-            request = route.calls.last.request
-            assert "location=archive" in str(request.url)
+            assert expected_param in str(request.url)
 
 
 class TestAsyncConcurrency:
@@ -374,9 +374,6 @@ class TestAsyncConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_document_fetches(self, api_key: str) -> None:
         """Test fetching multiple documents concurrently."""
-        import asyncio
-
-        # Set up mocks for different document IDs
         for doc_id in ["doc1", "doc2", "doc3"]:
             respx.get(
                 f"{READWISE_API_V3_BASE}/list/",
@@ -398,7 +395,6 @@ class TestAsyncConcurrency:
             )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            # Fetch all documents concurrently
             docs = await asyncio.gather(
                 client.v3.get_document("doc1"),
                 client.v3.get_document("doc2"),
@@ -407,18 +403,15 @@ class TestAsyncConcurrency:
 
             assert len(docs) == 3
             assert all(doc is not None for doc in docs)
-            # Type checker needs explicit None checks
-            assert docs[0] is not None and docs[0].id == "doc1"
-            assert docs[1] is not None and docs[1].id == "doc2"
-            assert docs[2] is not None and docs[2].id == "doc3"
+            for i, doc_id in enumerate(["doc1", "doc2", "doc3"]):
+                doc = docs[i]
+                assert doc is not None
+                assert doc.id == doc_id
 
     @respx.mock
     @pytest.mark.asyncio
     async def test_concurrent_url_saves(self, api_key: str) -> None:
         """Test saving multiple URLs concurrently."""
-        import asyncio
-
-        # Mock save endpoint to return incrementing IDs
         respx.post(f"{READWISE_API_V3_BASE}/save/").mock(
             side_effect=[
                 httpx.Response(200, json={"id": "new1", "url": "https://example.com/1"}),
@@ -435,6 +428,5 @@ class TestAsyncConcurrency:
             )
 
             assert len(results) == 3
-            assert results[0].id == "new1"
-            assert results[1].id == "new2"
-            assert results[2].id == "new3"
+            for i, expected_id in enumerate(["new1", "new2", "new3"]):
+                assert results[i].id == expected_id

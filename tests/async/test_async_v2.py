@@ -1,5 +1,7 @@
 """Tests for async Readwise API v2 client."""
 
+from datetime import UTC, datetime
+
 import httpx
 import pytest
 import respx
@@ -31,9 +33,7 @@ class TestAsyncV2Highlights:
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            highlights = []
-            async for h in client.v2.list_highlights():
-                highlights.append(h)
+            highlights = [h async for h in client.v2.list_highlights()]
 
             assert len(highlights) == 2
             assert highlights[0].id == 1
@@ -51,14 +51,40 @@ class TestAsyncV2Highlights:
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            highlights = []
-            async for h in client.v2.list_highlights(book_id=123, page_size=50):
-                highlights.append(h)
+            _ = [h async for h in client.v2.list_highlights(book_id=123, page_size=50)]
 
             assert route.called
             request = route.calls.last.request
             assert "book_id=123" in str(request.url)
             assert "page_size=50" in str(request.url)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_list_highlights_with_date_filters(self, api_key: str) -> None:
+        """Test listing highlights with highlighted_after and highlighted_before filters."""
+        route = respx.get(f"{READWISE_API_V2_BASE}/highlights/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"results": [], "next": None},
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            after = datetime(2024, 1, 1, tzinfo=UTC)
+            before = datetime(2024, 6, 30, tzinfo=UTC)
+            _ = [
+                h
+                async for h in client.v2.list_highlights(
+                    highlighted_after=after,
+                    highlighted_before=before,
+                )
+            ]
+
+            assert route.called
+            request = route.calls.last.request
+            url_str = str(request.url)
+            assert "highlighted_at__gt=" in url_str
+            assert "highlighted_at__lt=" in url_str
 
     @respx.mock
     @pytest.mark.asyncio
@@ -169,9 +195,7 @@ class TestAsyncV2Books:
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            books = []
-            async for book in client.v2.list_books():
-                books.append(book)
+            books = [book async for book in client.v2.list_books()]
 
             assert len(books) == 2
             assert books[0].title == "Book One"
@@ -188,13 +212,44 @@ class TestAsyncV2Books:
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            books = []
-            async for book in client.v2.list_books(category=BookCategory.ARTICLES):
-                books.append(book)
+            _ = [book async for book in client.v2.list_books(category=BookCategory.ARTICLES)]
 
             assert route.called
             request = route.calls.last.request
             assert "category=articles" in str(request.url)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_list_books_with_filters(self, api_key: str) -> None:
+        """Test listing books with source, updated_before, last_highlight_after/before."""
+        route = respx.get(f"{READWISE_API_V2_BASE}/books/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"results": [], "next": None},
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            updated_before = datetime(2024, 12, 31, tzinfo=UTC)
+            highlight_after = datetime(2024, 1, 1, tzinfo=UTC)
+            highlight_before = datetime(2024, 6, 30, tzinfo=UTC)
+            _ = [
+                book
+                async for book in client.v2.list_books(
+                    source="kindle",
+                    updated_before=updated_before,
+                    last_highlight_after=highlight_after,
+                    last_highlight_before=highlight_before,
+                )
+            ]
+
+            assert route.called
+            request = route.calls.last.request
+            url_str = str(request.url)
+            assert "source=kindle" in url_str
+            assert "updated__lt=" in url_str
+            assert "last_highlight_at__gt=" in url_str
+            assert "last_highlight_at__lt=" in url_str
 
     @respx.mock
     @pytest.mark.asyncio
@@ -241,9 +296,7 @@ class TestAsyncV2HighlightTags:
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            tags = []
-            async for tag in client.v2.list_highlight_tags(123):
-                tags.append(tag)
+            tags = [tag async for tag in client.v2.list_highlight_tags(123)]
 
             assert len(tags) == 2
             assert tags[0].name == "favorite"
@@ -264,6 +317,23 @@ class TestAsyncV2HighlightTags:
 
             assert tag.id == 5
             assert tag.name == "new-tag"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_update_highlight_tag(self, api_key: str) -> None:
+        """Test updating a tag on a highlight."""
+        respx.patch(f"{READWISE_API_V2_BASE}/highlights/123/tags/5/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"id": 5, "name": "updated-tag"},
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            tag = await client.v2.update_highlight_tag(123, 5, "updated-tag")
+
+            assert tag.id == 5
+            assert tag.name == "updated-tag"
 
     @respx.mock
     @pytest.mark.asyncio
@@ -295,9 +365,7 @@ class TestAsyncV2BookTags:
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            tags = []
-            async for tag in client.v2.list_book_tags(456):
-                tags.append(tag)
+            tags = [tag async for tag in client.v2.list_book_tags(456)]
 
             assert len(tags) == 1
             assert tags[0].name == "tech"
@@ -318,6 +386,34 @@ class TestAsyncV2BookTags:
 
             assert tag.id == 10
             assert tag.name == "programming"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_update_book_tag(self, api_key: str) -> None:
+        """Test updating a tag on a book."""
+        respx.patch(f"{READWISE_API_V2_BASE}/books/456/tags/10/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"id": 10, "name": "python"},
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            tag = await client.v2.update_book_tag(456, 10, "python")
+
+            assert tag.id == 10
+            assert tag.name == "python"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_delete_book_tag(self, api_key: str) -> None:
+        """Test removing a tag from a book."""
+        respx.delete(f"{READWISE_API_V2_BASE}/books/456/tags/10/").mock(
+            return_value=httpx.Response(204)
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            await client.v2.delete_book_tag(456, 10)  # Should not raise
 
 
 class TestAsyncV2Export:
@@ -348,13 +444,52 @@ class TestAsyncV2Export:
         )
 
         async with AsyncReadwiseClient(api_key=api_key) as client:
-            export_books = []
-            async for book in client.v2.export_highlights():
-                export_books.append(book)
+            export_books = [book async for book in client.v2.export_highlights()]
 
             assert len(export_books) == 1
             assert export_books[0].title == "Book One"
             assert len(export_books[0].highlights) == 2
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_export_with_filters(self, api_key: str) -> None:
+        """Test exporting highlights with updated_after, book_ids, and include_deleted."""
+        route = respx.get(url__startswith=f"{READWISE_API_V2_BASE}/export/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "user_book_id": 1,
+                            "title": "Filtered Book",
+                            "author": "Author",
+                            "highlights": [{"id": 10, "text": "Filtered highlight"}],
+                        }
+                    ],
+                    "nextPageCursor": None,
+                },
+            )
+        )
+
+        async with AsyncReadwiseClient(api_key=api_key) as client:
+            updated_after = datetime(2024, 1, 1, tzinfo=UTC)
+            export_books = [
+                book
+                async for book in client.v2.export_highlights(
+                    updated_after=updated_after,
+                    book_ids=[1, 2, 3],
+                    include_deleted=True,
+                )
+            ]
+
+            assert route.called
+            request = route.calls.last.request
+            url_str = str(request.url)
+            assert "updatedAfter=" in url_str
+            assert "ids=1%2C2%2C3" in url_str or "ids=1,2,3" in url_str
+            assert "includeDeleted=true" in url_str
+            assert len(export_books) == 1
+            assert export_books[0].title == "Filtered Book"
 
 
 class TestAsyncV2DailyReview:

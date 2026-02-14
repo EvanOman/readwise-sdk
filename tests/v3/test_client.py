@@ -80,6 +80,51 @@ class TestDocuments:
         assert "category=article" in str(request.url)
 
     @respx.mock
+    def test_list_documents_with_tags(self, api_key: str) -> None:
+        """Test listing documents filtered by tags."""
+        route = respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"results": [], "nextPageCursor": None},
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        list(client.v3.list_documents(tags=["python"]))
+
+        assert route.called
+        request = route.calls.last.request
+        assert "tag=python" in str(request.url)
+
+    @respx.mock
+    def test_list_documents_with_content(self, api_key: str) -> None:
+        """Test listing documents with with_content parameter."""
+        route = respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "doc1",
+                            "url": "https://example.com/1",
+                            "title": "Article 1",
+                            "html_content": "<p>Content</p>",
+                        }
+                    ],
+                    "nextPageCursor": None,
+                },
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        documents = list(client.v3.list_documents(with_content=True))
+
+        assert route.called
+        request = route.calls.last.request
+        assert "withHtmlContent=true" in str(request.url)
+        assert len(documents) == 1
+
+    @respx.mock
     def test_get_document(self, api_key: str) -> None:
         """Test getting a single document."""
         respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
@@ -192,49 +237,27 @@ class TestDocumentMovement:
     """Tests for document location operations."""
 
     @respx.mock
-    def test_move_to_later(self, api_key: str) -> None:
-        """Test moving document to later."""
-        respx.patch(f"{READWISE_API_V3_BASE}/update/doc123/").mock(
+    @pytest.mark.parametrize(
+        ("method", "doc_id"),
+        [
+            ("move_to_later", "doc123"),
+            ("archive", "doc123"),
+            ("move_to_inbox", "doc123"),
+        ],
+    )
+    def test_movement_methods(self, api_key: str, method: str, doc_id: str) -> None:
+        """Test document movement methods all update the document and return it."""
+        respx.patch(f"{READWISE_API_V3_BASE}/update/{doc_id}/").mock(
             return_value=httpx.Response(
                 200,
-                json={"id": "doc123", "url": "https://readwise.io/reader/doc123"},
+                json={"id": doc_id, "url": "https://readwise.io/reader/doc123"},
             )
         )
 
         client = ReadwiseClient(api_key=api_key)
-        result = client.v3.move_to_later("doc123")
+        result = getattr(client.v3, method)(doc_id)
 
-        assert result.id == "doc123"
-
-    @respx.mock
-    def test_archive(self, api_key: str) -> None:
-        """Test archiving a document."""
-        respx.patch(f"{READWISE_API_V3_BASE}/update/doc123/").mock(
-            return_value=httpx.Response(
-                200,
-                json={"id": "doc123", "url": "https://readwise.io/reader/doc123"},
-            )
-        )
-
-        client = ReadwiseClient(api_key=api_key)
-        result = client.v3.archive("doc123")
-
-        assert result.id == "doc123"
-
-    @respx.mock
-    def test_move_to_inbox(self, api_key: str) -> None:
-        """Test moving document back to inbox."""
-        respx.patch(f"{READWISE_API_V3_BASE}/update/doc123/").mock(
-            return_value=httpx.Response(
-                200,
-                json={"id": "doc123", "url": "https://readwise.io/reader/doc123"},
-            )
-        )
-
-        client = ReadwiseClient(api_key=api_key)
-        result = client.v3.move_to_inbox("doc123")
-
-        assert result.id == "doc123"
+        assert result.id == doc_id
 
 
 class TestTags:
@@ -280,7 +303,6 @@ class TestTags:
     @respx.mock
     def test_add_tag(self, api_key: str) -> None:
         """Test adding a tag to a document."""
-        # First call to get document
         respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
             return_value=httpx.Response(
                 200,
@@ -292,7 +314,6 @@ class TestTags:
                 },
             )
         )
-        # Second call to update
         respx.patch(f"{READWISE_API_V3_BASE}/update/doc123/").mock(
             return_value=httpx.Response(
                 200,
@@ -306,8 +327,39 @@ class TestTags:
         assert result.id == "doc123"
 
     @respx.mock
-    def test_add_tag_not_found(self, api_key: str) -> None:
-        """Test adding a tag to non-existent document."""
+    def test_remove_tag(self, api_key: str) -> None:
+        """Test removing a tag from a document."""
+        respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "doc123",
+                            "url": "https://example.com",
+                            "tags": ["keep-me", "remove-me"],
+                        }
+                    ],
+                    "nextPageCursor": None,
+                },
+            )
+        )
+        respx.patch(f"{READWISE_API_V3_BASE}/update/doc123/").mock(
+            return_value=httpx.Response(
+                200,
+                json={"id": "doc123", "url": "https://readwise.io/reader/doc123"},
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        result = client.v3.remove_tag("doc123", "remove-me")
+
+        assert result.id == "doc123"
+
+    @respx.mock
+    @pytest.mark.parametrize("method", ["remove_tag", "add_tag"])
+    def test_tag_operation_not_found(self, api_key: str, method: str) -> None:
+        """Test that tag operations raise NotFoundError for non-existent documents."""
         respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
             return_value=httpx.Response(
                 200,
@@ -317,59 +369,38 @@ class TestTags:
 
         client = ReadwiseClient(api_key=api_key)
         with pytest.raises(NotFoundError):
-            client.v3.add_tag("nonexistent", "tag")
+            getattr(client.v3, method)("nonexistent", "tag")
 
 
 class TestConvenienceMethods:
     """Tests for convenience methods."""
 
     @respx.mock
-    def test_get_inbox(self, api_key: str) -> None:
-        """Test getting inbox documents."""
+    @pytest.mark.parametrize(
+        ("method", "expected_param"),
+        [
+            ("get_inbox", "location=new"),
+            ("get_reading_list", "location=later"),
+            ("get_archive", "location=archive"),
+            ("get_articles", "category=article"),
+        ],
+    )
+    def test_convenience_methods(self, api_key: str, method: str, expected_param: str) -> None:
+        """Test convenience methods pass the correct query parameters."""
         route = respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
             return_value=httpx.Response(
                 200,
-                json={"results": [], "nextPageCursor": None},
+                json={
+                    "results": [{"id": "doc1", "url": "https://example.com/1", "title": "Doc 1"}],
+                    "nextPageCursor": None,
+                },
             )
         )
 
         client = ReadwiseClient(api_key=api_key)
-        list(client.v3.get_inbox())
+        results = list(getattr(client.v3, method)())
 
+        assert len(results) == 1
         assert route.called
         request = route.calls.last.request
-        assert "location=new" in str(request.url)
-
-    @respx.mock
-    def test_get_reading_list(self, api_key: str) -> None:
-        """Test getting reading list documents."""
-        route = respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
-            return_value=httpx.Response(
-                200,
-                json={"results": [], "nextPageCursor": None},
-            )
-        )
-
-        client = ReadwiseClient(api_key=api_key)
-        list(client.v3.get_reading_list())
-
-        assert route.called
-        request = route.calls.last.request
-        assert "location=later" in str(request.url)
-
-    @respx.mock
-    def test_get_archive(self, api_key: str) -> None:
-        """Test getting archived documents."""
-        route = respx.get(f"{READWISE_API_V3_BASE}/list/").mock(
-            return_value=httpx.Response(
-                200,
-                json={"results": [], "nextPageCursor": None},
-            )
-        )
-
-        client = ReadwiseClient(api_key=api_key)
-        list(client.v3.get_archive())
-
-        assert route.called
-        request = route.calls.last.request
-        assert "location=archive" in str(request.url)
+        assert expected_param in str(request.url)

@@ -1,6 +1,7 @@
 """Tests for HighlightPusher."""
 
 from datetime import datetime
+from typing import Any
 
 import httpx
 import respx
@@ -20,6 +21,29 @@ from readwise_sdk.contrib.highlight_push import (
     UpdateResult,
 )
 from readwise_sdk.v2.models import BookCategory
+
+
+def _highlight_response(
+    highlight_id: int,
+    text: str = "text",
+    note: str | None = None,
+    book_id: int = 456,
+) -> dict[str, Any]:
+    """Build a full highlight response dict for mock returns."""
+    return {
+        "id": highlight_id,
+        "text": text,
+        "note": note,
+        "location": None,
+        "location_type": None,
+        "url": None,
+        "color": None,
+        "highlighted_at": None,
+        "created_at": None,
+        "updated_at": None,
+        "book_id": book_id,
+        "tags": [],
+    }
 
 
 class TestSimpleHighlight:
@@ -322,6 +346,53 @@ class TestHighlightPusher:
         assert by_name["author"].truncated_length == MAX_AUTHOR_LENGTH
 
     @respx.mock
+    def test_push_none_text_with_auto_truncate(self, api_key: str) -> None:
+        """Test pushing with text=None and auto_truncate enabled."""
+        respx.post(f"{READWISE_API_V2_BASE}/highlights/").mock(
+            return_value=httpx.Response(
+                200,
+                json=[{"modified_highlights": [555]}],
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        pusher = HighlightPusher(client, auto_truncate=True)
+
+        # Create a SimpleHighlight with text set to None via direct construction
+        # (bypassing the push() method which requires text as str)
+        highlight = SimpleHighlight(text=None, title="Test")  # type: ignore[arg-type]
+        results = pusher.push_batch([highlight])
+
+        assert len(results) == 1
+        assert results[0].success is True
+        assert results[0].highlight_id == 555
+        assert results[0].was_truncated is False
+
+    @respx.mock
+    def test_update_note_truncation(self, api_key: str) -> None:
+        """Test updating a highlight with a note exceeding MAX_NOTE_LENGTH."""
+        respx.patch(f"{READWISE_API_V2_BASE}/highlights/123/").mock(
+            return_value=httpx.Response(
+                200,
+                json=_highlight_response(123, text="Original text", note="n" * MAX_NOTE_LENGTH),
+            )
+        )
+
+        client = ReadwiseClient(api_key=api_key)
+        pusher = HighlightPusher(client, auto_truncate=True)
+
+        long_note = "n" * (MAX_NOTE_LENGTH + 200)
+        result = pusher.update(highlight_id=123, note=long_note)
+
+        assert result.success is True
+        assert result.was_truncated is True
+        assert result.truncation_info is not None
+        assert len(result.truncation_info.fields) == 1
+        assert result.truncation_info.fields[0].field_name == "note"
+        assert result.truncation_info.fields[0].original_length == MAX_NOTE_LENGTH + 200
+        assert result.truncation_info.fields[0].truncated_length == MAX_NOTE_LENGTH
+
+    @respx.mock
     def test_push_no_truncation_when_disabled(self, api_key: str) -> None:
         """Test that truncation is not applied when disabled."""
         route = respx.post(f"{READWISE_API_V2_BASE}/highlights/").mock(
@@ -456,20 +527,7 @@ class TestHighlightPusherUpdate:
         respx.patch(f"{READWISE_API_V2_BASE}/highlights/123/").mock(
             return_value=httpx.Response(
                 200,
-                json={
-                    "id": 123,
-                    "text": "Updated text",
-                    "note": "Updated note",
-                    "location": None,
-                    "location_type": None,
-                    "url": None,
-                    "color": None,
-                    "highlighted_at": None,
-                    "created_at": None,
-                    "updated_at": None,
-                    "book_id": 456,
-                    "tags": [],
-                },
+                json=_highlight_response(123, text="Updated text", note="Updated note"),
             )
         )
 
@@ -494,20 +552,7 @@ class TestHighlightPusherUpdate:
         respx.patch(f"{READWISE_API_V2_BASE}/highlights/123/").mock(
             return_value=httpx.Response(
                 200,
-                json={
-                    "id": 123,
-                    "text": "x" * MAX_TEXT_LENGTH,
-                    "note": None,
-                    "location": None,
-                    "location_type": None,
-                    "url": None,
-                    "color": None,
-                    "highlighted_at": None,
-                    "created_at": None,
-                    "updated_at": None,
-                    "book_id": 456,
-                    "tags": [],
-                },
+                json=_highlight_response(123, text="x" * MAX_TEXT_LENGTH),
             )
         )
 
@@ -531,39 +576,13 @@ class TestHighlightPusherUpdate:
         respx.patch(f"{READWISE_API_V2_BASE}/highlights/1/").mock(
             return_value=httpx.Response(
                 200,
-                json={
-                    "id": 1,
-                    "text": "Updated 1",
-                    "note": None,
-                    "location": None,
-                    "location_type": None,
-                    "url": None,
-                    "color": None,
-                    "highlighted_at": None,
-                    "created_at": None,
-                    "updated_at": None,
-                    "book_id": 100,
-                    "tags": [],
-                },
+                json=_highlight_response(1, text="Updated 1", book_id=100),
             )
         )
         respx.patch(f"{READWISE_API_V2_BASE}/highlights/2/").mock(
             return_value=httpx.Response(
                 200,
-                json={
-                    "id": 2,
-                    "text": "Updated 2",
-                    "note": None,
-                    "location": None,
-                    "location_type": None,
-                    "url": None,
-                    "color": None,
-                    "highlighted_at": None,
-                    "created_at": None,
-                    "updated_at": None,
-                    "book_id": 200,
-                    "tags": [],
-                },
+                json=_highlight_response(2, text="Updated 2", book_id=200),
             )
         )
 
