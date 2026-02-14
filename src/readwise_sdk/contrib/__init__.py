@@ -21,9 +21,11 @@ from readwise_sdk.contrib.document_import import (
 from readwise_sdk.contrib.highlight_push import (
     AsyncHighlightPusher,
     DeleteResult,
+    FieldTruncation,
     HighlightPusher,
     PushResult,
     SimpleHighlight,
+    TruncationInfo,
     UpdateResult,
 )
 
@@ -35,6 +37,8 @@ __all__ = [
     "PushResult",
     "UpdateResult",
     "DeleteResult",
+    "TruncationInfo",
+    "FieldTruncation",
     # document_import
     "DocumentImporter",
     "ImportedDocument",

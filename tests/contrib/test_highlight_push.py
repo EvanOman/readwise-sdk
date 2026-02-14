@@ -12,9 +12,11 @@ from readwise_sdk.contrib.highlight_push import (
     MAX_TEXT_LENGTH,
     MAX_TITLE_LENGTH,
     DeleteResult,
+    FieldTruncation,
     HighlightPusher,
     PushResult,
     SimpleHighlight,
+    TruncationInfo,
     UpdateResult,
 )
 from readwise_sdk.v2.models import BookCategory
@@ -65,6 +67,7 @@ class TestPushResult:
         assert result.book_id == 456
         assert result.error is None
         assert result.was_truncated is False
+        assert result.truncation_info is None
 
     def test_failure_result(self) -> None:
         """Test failed push result."""
@@ -72,6 +75,52 @@ class TestPushResult:
         assert result.success is False
         assert result.highlight_id is None
         assert result.error == "API error"
+        assert result.truncation_info is None
+
+
+class TestFieldTruncation:
+    """Tests for FieldTruncation dataclass."""
+
+    def test_chars_removed(self) -> None:
+        """Test chars_removed property."""
+        ft = FieldTruncation(field_name="text", original_length=9000, truncated_length=8191)
+        assert ft.chars_removed == 809
+
+    def test_no_chars_removed(self) -> None:
+        """Test chars_removed when lengths are equal."""
+        ft = FieldTruncation(field_name="text", original_length=100, truncated_length=100)
+        assert ft.chars_removed == 0
+
+
+class TestTruncationInfo:
+    """Tests for TruncationInfo dataclass."""
+
+    def test_empty_fields(self) -> None:
+        """Test TruncationInfo with no fields."""
+        info = TruncationInfo()
+        assert info.fields == []
+        assert info.truncated_field_names == []
+
+    def test_truncated_field_names(self) -> None:
+        """Test truncated_field_names property."""
+        info = TruncationInfo(
+            fields=[
+                FieldTruncation(field_name="text", original_length=9000, truncated_length=8191),
+                FieldTruncation(field_name="title", original_length=600, truncated_length=511),
+            ]
+        )
+        assert info.truncated_field_names == ["text", "title"]
+
+    def test_single_field(self) -> None:
+        """Test TruncationInfo with a single truncated field."""
+        info = TruncationInfo(
+            fields=[
+                FieldTruncation(field_name="note", original_length=10000, truncated_length=8191),
+            ]
+        )
+        assert len(info.fields) == 1
+        assert info.truncated_field_names == ["note"]
+        assert info.fields[0].chars_removed == 1809
 
 
 class TestHighlightPusher:
@@ -99,6 +148,7 @@ class TestHighlightPusher:
         assert result.success is True
         assert result.highlight_id == 123
         assert result.was_truncated is False
+        assert result.truncation_info is None
 
     @respx.mock
     def test_push_with_all_fields(self, api_key: str) -> None:
@@ -222,6 +272,13 @@ class TestHighlightPusher:
 
         assert result.success is True
         assert result.was_truncated is True
+        assert result.truncation_info is not None
+        assert len(result.truncation_info.fields) == 1
+        assert result.truncation_info.fields[0].field_name == "text"
+        assert result.truncation_info.fields[0].original_length == MAX_TEXT_LENGTH + 100
+        assert result.truncation_info.fields[0].truncated_length == MAX_TEXT_LENGTH
+        assert result.truncation_info.fields[0].chars_removed == 100
+        assert result.truncation_info.truncated_field_names == ["text"]
 
     @respx.mock
     def test_push_truncation_all_fields(self, api_key: str) -> None:
@@ -245,6 +302,24 @@ class TestHighlightPusher:
 
         assert result.success is True
         assert result.was_truncated is True
+        assert result.truncation_info is not None
+        assert len(result.truncation_info.fields) == 4
+        assert result.truncation_info.truncated_field_names == [
+            "text",
+            "note",
+            "title",
+            "author",
+        ]
+        # Verify each field has correct lengths
+        by_name = {f.field_name: f for f in result.truncation_info.fields}
+        assert by_name["text"].original_length == MAX_TEXT_LENGTH + 10
+        assert by_name["text"].truncated_length == MAX_TEXT_LENGTH
+        assert by_name["note"].original_length == MAX_NOTE_LENGTH + 10
+        assert by_name["note"].truncated_length == MAX_NOTE_LENGTH
+        assert by_name["title"].original_length == MAX_TITLE_LENGTH + 10
+        assert by_name["title"].truncated_length == MAX_TITLE_LENGTH
+        assert by_name["author"].original_length == MAX_AUTHOR_LENGTH + 10
+        assert by_name["author"].truncated_length == MAX_AUTHOR_LENGTH
 
     @respx.mock
     def test_push_no_truncation_when_disabled(self, api_key: str) -> None:
@@ -265,6 +340,7 @@ class TestHighlightPusher:
 
         assert result.success is True
         assert result.was_truncated is False
+        assert result.truncation_info is None
         # Verify the request was made
         assert route.called
 
@@ -342,6 +418,7 @@ class TestUpdateResult:
         assert result.highlight_id == 123
         assert result.error is None
         assert result.was_truncated is False
+        assert result.truncation_info is None
 
     def test_failure_result(self) -> None:
         """Test failed update result."""
@@ -349,6 +426,7 @@ class TestUpdateResult:
         assert result.success is False
         assert result.highlight_id == 123
         assert result.error == "API error"
+        assert result.truncation_info is None
 
 
 class TestDeleteResult:
@@ -441,6 +519,11 @@ class TestHighlightPusherUpdate:
 
         assert result.success is True
         assert result.was_truncated is True
+        assert result.truncation_info is not None
+        assert len(result.truncation_info.fields) == 1
+        assert result.truncation_info.fields[0].field_name == "text"
+        assert result.truncation_info.fields[0].original_length == MAX_TEXT_LENGTH + 100
+        assert result.truncation_info.fields[0].truncated_length == MAX_TEXT_LENGTH
 
     @respx.mock
     def test_update_batch(self, api_key: str) -> None:

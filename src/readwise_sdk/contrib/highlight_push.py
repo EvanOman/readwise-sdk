@@ -47,6 +47,42 @@ MAX_AUTHOR_LENGTH = 1024
 
 
 @dataclass
+class FieldTruncation:
+    """Truncation details for a single field."""
+
+    field_name: str
+    original_length: int
+    truncated_length: int
+
+    @property
+    def chars_removed(self) -> int:
+        """Number of characters removed by truncation."""
+        return self.original_length - self.truncated_length
+
+
+@dataclass
+class TruncationInfo:
+    """Detailed information about which fields were truncated and by how much.
+
+    Provides per-field truncation details when ``PushResult.was_truncated``
+    or ``UpdateResult.was_truncated`` is ``True``.
+
+    Example:
+        result = pusher.push(text="x" * 10000, title="Test")
+        if result.truncation_info:
+            for ft in result.truncation_info.fields:
+                print(f"{ft.field_name}: {ft.original_length} -> {ft.truncated_length}")
+    """
+
+    fields: list[FieldTruncation] = field(default_factory=list)
+
+    @property
+    def truncated_field_names(self) -> list[str]:
+        """List of field names that were truncated."""
+        return [f.field_name for f in self.fields]
+
+
+@dataclass
 class SimpleHighlight:
     """A simplified highlight for pushing to Readwise."""
 
@@ -73,6 +109,7 @@ class PushResult:
     error: str | None = None
     original: SimpleHighlight | None = None
     was_truncated: bool = False
+    truncation_info: TruncationInfo | None = None
 
 
 @dataclass
@@ -84,6 +121,7 @@ class UpdateResult:
     highlight: Highlight | None = None
     error: str | None = None
     was_truncated: bool = False
+    truncation_info: TruncationInfo | None = None
 
 
 @dataclass
@@ -97,7 +135,7 @@ class DeleteResult:
 
 def _to_create_request(
     highlight: SimpleHighlight, auto_truncate: bool
-) -> tuple[HighlightCreate, bool]:
+) -> tuple[HighlightCreate, bool, TruncationInfo | None]:
     """Convert SimpleHighlight to HighlightCreate, optionally truncating.
 
     Args:
@@ -105,9 +143,10 @@ def _to_create_request(
         auto_truncate: Whether to truncate fields to API limits.
 
     Returns:
-        Tuple of (HighlightCreate, was_truncated).
+        Tuple of (HighlightCreate, was_truncated, truncation_info).
     """
     was_truncated = False
+    truncation_info: TruncationInfo | None = None
 
     text = highlight.text
     note = highlight.note
@@ -115,11 +154,37 @@ def _to_create_request(
     author = highlight.author
 
     if auto_truncate:
+        original_lengths = {
+            "text": len(text) if text is not None else 0,
+            "note": len(note) if note is not None else 0,
+            "title": len(title) if title is not None else 0,
+            "author": len(author) if author is not None else 0,
+        }
+
         text, t1 = truncate_string(text, MAX_TEXT_LENGTH)
         note, t2 = truncate_string(note, MAX_NOTE_LENGTH)
         title, t3 = truncate_string(title, MAX_TITLE_LENGTH)
         author, t4 = truncate_string(author, MAX_AUTHOR_LENGTH)
         was_truncated = any([t1, t2, t3, t4])
+
+        if was_truncated:
+            field_truncations: list[FieldTruncation] = []
+            for field_name, flag, max_len in [
+                ("text", t1, MAX_TEXT_LENGTH),
+                ("note", t2, MAX_NOTE_LENGTH),
+                ("title", t3, MAX_TITLE_LENGTH),
+                ("author", t4, MAX_AUTHOR_LENGTH),
+            ]:
+                if flag:
+                    field_truncations.append(
+                        FieldTruncation(
+                            field_name=field_name,
+                            original_length=original_lengths[field_name],
+                            truncated_length=max_len,
+                        )
+                    )
+            truncation_info = TruncationInfo(fields=field_truncations)
+
         # Text must not be None after truncation
         if text is None:
             text = ""
@@ -138,6 +203,7 @@ def _to_create_request(
             highlighted_at=highlight.highlighted_at,
         ),
         was_truncated,
+        truncation_info,
     )
 
 
@@ -147,7 +213,7 @@ def _to_update_request(
     location: int | None,
     location_type: str | None,
     auto_truncate: bool,
-) -> tuple[HighlightUpdate, bool]:
+) -> tuple[HighlightUpdate, bool, TruncationInfo | None]:
     """Create HighlightUpdate, optionally truncating text fields.
 
     Args:
@@ -158,17 +224,39 @@ def _to_update_request(
         auto_truncate: Whether to truncate fields to API limits.
 
     Returns:
-        Tuple of (HighlightUpdate, was_truncated).
+        Tuple of (HighlightUpdate, was_truncated, truncation_info).
     """
     was_truncated = False
+    truncation_info: TruncationInfo | None = None
 
     if auto_truncate:
+        field_truncations: list[FieldTruncation] = []
         if text is not None:
+            original_len = len(text)
             text, t1 = truncate_string(text, MAX_TEXT_LENGTH)
-            was_truncated = was_truncated or t1
+            if t1:
+                was_truncated = True
+                field_truncations.append(
+                    FieldTruncation(
+                        field_name="text",
+                        original_length=original_len,
+                        truncated_length=MAX_TEXT_LENGTH,
+                    )
+                )
         if note is not None:
+            original_len = len(note)
             note, t2 = truncate_string(note, MAX_NOTE_LENGTH)
-            was_truncated = was_truncated or t2
+            if t2:
+                was_truncated = True
+                field_truncations.append(
+                    FieldTruncation(
+                        field_name="note",
+                        original_length=original_len,
+                        truncated_length=MAX_NOTE_LENGTH,
+                    )
+                )
+        if was_truncated:
+            truncation_info = TruncationInfo(fields=field_truncations)
 
     return (
         HighlightUpdate(
@@ -178,6 +266,7 @@ def _to_update_request(
             location_type=location_type,
         ),
         was_truncated,
+        truncation_info,
     )
 
 
@@ -279,11 +368,13 @@ class HighlightPusher:
 
         # Convert to create requests
         create_requests = []
-        truncation_flags = []
+        truncation_flags: list[bool] = []
+        truncation_infos: list[TruncationInfo | None] = []
         for h in highlights:
-            req, was_truncated = _to_create_request(h, self._auto_truncate)
+            req, was_truncated, trunc_info = _to_create_request(h, self._auto_truncate)
             create_requests.append(req)
             truncation_flags.append(was_truncated)
+            truncation_infos.append(trunc_info)
 
         # Push to API
         results: list[PushResult] = []
@@ -302,6 +393,7 @@ class HighlightPusher:
                             book_id=None,  # Not returned by API
                             original=h,
                             was_truncated=truncation_flags[i],
+                            truncation_info=truncation_infos[i],
                         )
                     )
                 else:
@@ -311,6 +403,7 @@ class HighlightPusher:
                             error="No API result returned",
                             original=h,
                             was_truncated=truncation_flags[i],
+                            truncation_info=truncation_infos[i],
                         )
                     )
         except Exception as e:
@@ -322,6 +415,7 @@ class HighlightPusher:
                         error=str(e),
                         original=h,
                         was_truncated=truncation_flags[i],
+                        truncation_info=truncation_infos[i],
                     )
                 )
 
@@ -376,7 +470,7 @@ class HighlightPusher:
 
         for highlight_id, text, note, location, location_type in updates:
             try:
-                update_req, was_truncated = _to_update_request(
+                update_req, was_truncated, trunc_info = _to_update_request(
                     text, note, location, location_type, self._auto_truncate
                 )
                 highlight = self._client.v2.update_highlight(highlight_id, update_req)
@@ -386,6 +480,7 @@ class HighlightPusher:
                         highlight_id=highlight_id,
                         highlight=highlight,
                         was_truncated=was_truncated,
+                        truncation_info=trunc_info,
                     )
                 )
             except Exception as e:
@@ -550,11 +645,13 @@ class AsyncHighlightPusher:
 
         # Convert to create requests
         create_requests = []
-        truncation_flags = []
+        truncation_flags: list[bool] = []
+        truncation_infos: list[TruncationInfo | None] = []
         for h in highlights:
-            req, was_truncated = _to_create_request(h, self._auto_truncate)
+            req, was_truncated, trunc_info = _to_create_request(h, self._auto_truncate)
             create_requests.append(req)
             truncation_flags.append(was_truncated)
+            truncation_infos.append(trunc_info)
 
         # Push to API
         results: list[PushResult] = []
@@ -571,6 +668,7 @@ class AsyncHighlightPusher:
                             book_id=None,
                             original=h,
                             was_truncated=truncation_flags[i],
+                            truncation_info=truncation_infos[i],
                         )
                     )
                 else:
@@ -580,6 +678,7 @@ class AsyncHighlightPusher:
                             error="No API result returned",
                             original=h,
                             was_truncated=truncation_flags[i],
+                            truncation_info=truncation_infos[i],
                         )
                     )
         except Exception as e:
@@ -590,6 +689,7 @@ class AsyncHighlightPusher:
                         error=str(e),
                         original=h,
                         was_truncated=truncation_flags[i],
+                        truncation_info=truncation_infos[i],
                     )
                 )
 
@@ -644,7 +744,7 @@ class AsyncHighlightPusher:
 
         for highlight_id, text, note, location, location_type in updates:
             try:
-                update_req, was_truncated = _to_update_request(
+                update_req, was_truncated, trunc_info = _to_update_request(
                     text, note, location, location_type, self._auto_truncate
                 )
                 highlight = await self._client.v2.update_highlight(highlight_id, update_req)
@@ -654,6 +754,7 @@ class AsyncHighlightPusher:
                         highlight_id=highlight_id,
                         highlight=highlight,
                         was_truncated=was_truncated,
+                        truncation_info=trunc_info,
                     )
                 )
             except Exception as e:
